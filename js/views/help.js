@@ -13,7 +13,15 @@ ED.views.help = function () {
     },
     {
       id: "files", title: "What files to upload",
-      body: "<p><b>Class result reports</b> (required): the per-class export from your assessment tool — PDF, CSV, or XLSX. These contain the question-by-question results.</p><p class=\"mt-8\"><b>Exam questions and reading booklet</b> (optional but recommended): these let the review explain <i>why</i> a question broke, not just that it broke.</p><p class=\"mt-8\"><b>Answer key</b> (recommended): the app compares your key against the keys detected inside the result files — that comparison is how key errors get caught.</p>"
+      body: "<p><b>Class result reports</b> (required): the per-class export from your assessment tool. <b>Right now only CSV files are actually analyzed.</b> PDF and XLSX files are accepted but clearly marked “not yet parsed” — they won’t affect results until that’s built. Most assessment tools can export CSV; there’s a sample CSV in the upload step showing the two layouts we read (one row per student, or one row per question).</p><p class=\"mt-8\"><b>Answer key</b>: enter it by hand or paste it in (up to 130 questions). The app compares your key against your uploaded results — that comparison is how key errors get caught.</p><p class=\"mt-8\"><b>Exam questions and reading booklet</b> (optional): in this build these are recorded for reference only — the app doesn’t read exam text yet, and it says so wherever that matters.</p>"
+    },
+    {
+      id: "data-source", title: "Demo data vs. your data",
+      body: "<p>Every results page, report, and export is labeled with where its numbers came from: <b>Demo Data</b> (the built-in sample exam) or <b>Uploaded Data</b> (your parsed CSVs, with the file and student counts shown). The two never mix. If none of your files could be parsed, the app blocks the results page and tells you why instead of showing fake numbers.</p>"
+    },
+    {
+      id: "saving", title: "Saving your work",
+      body: "<p>“Save analysis” on the Results page stores the analysis in <b>this browser’s local storage</b> — on this device, not in the cloud. Reopen saves from the Saved page, and export a JSON backup there if the work matters (clearing browser data deletes local saves). Real sign-in with cloud storage is planned; the Sign in page explains honestly what works today.</p>"
     },
     {
       id: "labels", title: "What the labels mean",

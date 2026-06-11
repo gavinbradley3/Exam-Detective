@@ -18,19 +18,43 @@ window.ED = window.ED || {};
     return '<span class="flag ' + info.cls + '">' + A().esc(label) + '</span>';
   }
 
+  // ----- Data source banner -----
+  // Every results/report surface states where its numbers come from.
+  function sourceBanner(an) {
+    if (an.source === "uploaded") {
+      var m = an.uploadedMeta || {};
+      var bits = [
+        (m.filesUploaded || 0) + " file" + (m.filesUploaded === 1 ? "" : "s") + " uploaded",
+        (m.filesParsed || 0) + " parsed",
+        an.totalResponses + " student" + (an.totalResponses === 1 ? "" : "s"),
+        an.sections.length + " section" + (an.sections.length === 1 ? "" : "s")
+      ];
+      var unparsed = (m.unparsedFiles && m.unparsedFiles.length)
+        ? '<span class="src-note">Not analyzed (parsing not yet supported): ' + m.unparsedFiles.map(A().esc).join(", ") + '</span>'
+        : "";
+      return '<div class="src-banner uploaded"><span class="src-chip">Uploaded Data</span>' +
+        '<span class="src-meta">' + bits.join(" · ") + '</span>' + unparsed + '</div>';
+    }
+    return '<div class="src-banner demo"><span class="src-chip">Demo Data</span>' +
+      '<span class="src-meta">A sample Grade 8 ELA exam built into the app — not your uploads. Run your own analysis from <a href="#/new-analysis">New Analysis</a>.</span></div>';
+  }
+
   // ----- Report header (eyebrow / title / meta row / intro) -----
   function reportHeader(an, opts) {
     opts = opts || {};
     var eyebrow = opts.eyebrow || "Teacher Review &nbsp;·&nbsp; Combined Data Check";
     var title = opts.title || an.examTitle;
+    var sectionsLabel = an.sections.length + (an.grade ? " Grade " + A().esc(an.grade) : "") +
+      " section" + (an.sections.length === 1 ? "" : "s");
     return (
       '<div class="eyebrow">' + eyebrow + '</div>' +
       '<h1>' + title + '</h1>' +
       '<div class="meta-row">' +
         '<span><b>' + A().esc(an.examType) + '</b></span>' +
-        '<span>' + an.sections.length + ' Grade ' + A().esc(an.grade) + ' sections &nbsp;·&nbsp; <b>' + an.totalResponses + ' students total</b></span>' +
+        '<span>' + sectionsLabel + ' &nbsp;·&nbsp; <b>' + an.totalResponses + ' students total</b></span>' +
         '<span>Reviewed <b>' + A().esc(an.reviewedLabel) + '</b></span>' +
       '</div>' +
+      sourceBanner(an) +
       '<p class="intro">' + an.openingSummary + '</p>'
     );
   }
@@ -63,17 +87,19 @@ window.ED = window.ED || {};
 
   // ----- Exam health snapshot -----
   function snapshot(an) {
+    var keyErrs = an.keyAudit.mismatchQuestions.length;
+    var urgent = an.flagged.filter(function (f) {
+      return ["Possible Key Error", "Drop From Scoring", "Accept Multiple Answers", "Immediate Action"].indexOf(f.flag) !== -1;
+    }).length;
     var snaps = [
       { lbl: "Students", val: an.totalResponses },
       { lbl: "Classes", val: an.sections.length },
       { lbl: "Average", val: an.combinedAverage + "%" },
-      { lbl: "Median", val: an.combinedMedian + "%" },
+      { lbl: "Median", val: an.combinedMedian === null ? "—" : an.combinedMedian + "%" },
       { lbl: "Questions", val: an.totalQuestions },
-      { lbl: "Flagged", val: an.flagged.length, cls: "alert" },
-      { lbl: "Key Errors", val: an.keyAudit.mismatchQuestions.length, cls: "alert" },
-      { lbl: "Need Action Now", val: an.flagged.filter(function (f) {
-          return ["Possible Key Error", "Drop From Scoring", "Accept Multiple Answers", "Immediate Action"].indexOf(f.flag) !== -1;
-        }).length, cls: "alert" }
+      { lbl: "Flagged", val: an.flagged.length, cls: an.flagged.length ? "alert" : "good" },
+      { lbl: "Key Concerns", val: keyErrs, cls: keyErrs ? "alert" : "good" },
+      { lbl: "Need Action Now", val: urgent, cls: urgent ? "alert" : "good" }
     ];
     return (
       '<div class="rhead">Exam Health Snapshot</div>' +
@@ -85,6 +111,10 @@ window.ED = window.ED || {};
 
   // ----- Priority Action List -----
   function priorityTable(an, withLinks) {
+    if (!an.flagged.length) {
+      return '<div class="rhead">Priority Action List</div>' +
+        '<p class="rhead-sub">No questions were flagged. Every question stayed under the review thresholds — no key conflicts, no extreme miss rates, no large section gaps.</p>';
+    }
     var rows = A().priorityOrder(an.flagged.map(function (f) {
       var st = A().statsFor(an, f.number);
       return Object.assign({ combined: st.combinedMissed }, f);
@@ -166,7 +196,9 @@ window.ED = window.ED || {};
     // Question + options
     html += '<div class="qtext">' + f.question +
       (f.badge ? ' <span class="badge">' + f.badge + '</span>' : '') + '</div>';
-    html += '<ul class="opts">' + f.options.map(optionRow).join("") + '</ul>';
+    if (f.options && f.options.length) {
+      html += '<ul class="opts">' + f.options.map(optionRow).join("") + '</ul>';
+    }
 
     // The Problem
     html += '<div class="label-line problem"><span class="dot" aria-hidden="true"></span>THE PROBLEM</div>';
@@ -200,6 +232,10 @@ window.ED = window.ED || {};
 
   // ----- Grouped question sections (by passage) -----
   function groupedSections(an, opts) {
+    if (!an.flagged.length) {
+      return '<div class="qcard" style="text-align:center;padding:34px 24px;">' +
+        '<p class="prose" style="font-size:14px;"><b>Nothing to review here.</b> No questions crossed the flag thresholds in this dataset, so there are no question cards to show.</p></div>';
+    }
     var html = "";
     an.groups.forEach(function (g) {
       var qs = an.flagged.filter(function (f) {
@@ -244,14 +280,15 @@ window.ED = window.ED || {};
   // ----- Department Pattern Summary -----
   function departmentPatternSection(an) {
     var dp = an.departmentPattern;
+    var list = function (arr) {
+      return arr.length ? arr.map(function (q) { return "Q" + q; }).join(", ") : "none";
+    };
     return (
       '<div class="rhead">Department Pattern Summary</div>' +
       '<p class="rhead-sub">' + A().esc(dp.note) + '</p>' +
-      '<p class="rhead-sub"><b>Widespread (most or all classes):</b> ' +
-        dp.widespread.map(function (q) { return "Q" + q; }).join(", ") +
+      '<p class="rhead-sub"><b>Widespread (most or all classes):</b> ' + list(dp.widespread) +
         ' — likely question-design or key issues.<br>' +
-        '<b>Section-specific:</b> ' +
-        dp.sectionSpecific.map(function (q) { return "Q" + q; }).join(", ") +
+        '<b>Section-specific:</b> ' + list(dp.sectionSpecific) +
         ' — possible pacing or class-specific patterns; a neutral conversation, not a verdict.</p>'
     );
   }
@@ -276,6 +313,7 @@ window.ED = window.ED || {};
 
   ED.blocks = {
     flagBadge: flagBadge,
+    sourceBanner: sourceBanner,
     reportHeader: reportHeader,
     legend: legend,
     keyWarning: keyWarning,

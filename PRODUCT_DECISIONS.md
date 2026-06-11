@@ -1,6 +1,55 @@
 # Product Decisions
 
-Last updated: 2026-06-11
+Last updated: 2026-06-11 (data-honesty + CSV parsing release)
+
+## One active dataset; demo and uploads never mix
+
+The first build silently showed demo numbers ("5 sections / 129 students")
+after a real upload — misleading, and the kind of thing that kills trust with
+teachers. Now exactly one dataset is ACTIVE at a time (demo or uploaded),
+every surface carries a Demo Data / Uploaded Data banner with real counts,
+loading the demo clears uploads (and vice versa), and if no uploaded file
+could be parsed the run is blocked with an honest explanation instead of a
+fake results page. Honesty beats impressiveness, every time.
+
+## Uploaded data gets computed analysis, not invented prose
+
+For uploaded CSVs, flags come from transparent thresholds (documented in
+`js/analysis-builder.js`) and all explanation text is assembled from the
+computed numbers. Judgments that require reading the exam (rewrites,
+"hard but fair", passage support) are not made — the results say plainly
+that the exam text wasn't analyzed. Demo data keeps its rich narrative
+because it represents what the product will do once text analysis exists.
+
+## CSV first
+
+CSV is the only really-parsed upload format (student-rows and aggregate
+layouts). PDF/XLSX are accepted but visibly labeled "not yet parsed" rather
+than disabled — teachers can stage files now, and the label sets honest
+expectations. Rationale: every assessment tool exports CSV, and one real
+path beats three fake ones.
+
+## Settings (and the wizard) start blank
+
+No pre-chosen subject/grade/format — placeholder text only, plus a
+"still to decide" status box. Required decisions are enforced where they
+matter: wizard Step 1 blocks continuing without exam name/subject/grade,
+with human error messages. Defaults a teacher explicitly saves in Settings
+do seed the wizard (their decision, labeled as such).
+
+## Login: local profile now, no fake Google button
+
+The app is static, so real Google login is impossible without provider
+setup. The Sign-in page offers a working local profile (browser storage,
+labeled as such) and shows the Google button disabled with an explanation
+pointing at AUTH_AND_STORAGE_PLAN.md (recommended: Supabase Auth + Google
+OAuth). A clickable button that pretends to work was explicitly rejected.
+
+## Exports carry their source inside the file
+
+CSV/HTML exports state "DEMO DATA" or "Uploaded data (n files)" in the file
+content and in the filename, so a shared file can't quietly launder demo
+numbers into a department meeting.
 
 ## Stack: plain HTML/CSS/JS, no framework, no build step
 

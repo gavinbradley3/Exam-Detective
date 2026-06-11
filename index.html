@@ -24,10 +24,12 @@
     <nav class="mainnav" aria-label="Main navigation">
       <a href="#/dashboard" data-nav="dashboard">Dashboard</a>
       <a href="#/new-analysis" data-nav="new-analysis">New Analysis</a>
-      <a href="#/comparison" data-nav="comparison">Department Comparison</a>
+      <a href="#/comparison" data-nav="comparison">Comparison</a>
       <a href="#/reports" data-nav="reports">Reports</a>
+      <a href="#/saved" data-nav="saved">Saved</a>
       <a href="#/help" data-nav="help">Help</a>
       <a href="#/settings" data-nav="settings">Settings</a>
+      <a href="#/login" data-nav="login" class="nav-signin" id="nav-signin">Sign in</a>
     </nav>
   </div>
 </header>
@@ -54,6 +56,9 @@
 <!-- Data and logic -->
 <script src="js/data/demo-data.js"></script>
 <script src="js/analysis.js"></script>
+<script src="js/csv-parse.js"></script>
+<script src="js/analysis-builder.js"></script>
+<script src="js/data-store.js"></script>
 <script src="js/report-blocks.js"></script>
 <!-- Views (each registers itself on ED.views) -->
 <script src="js/views/landing.js"></script>
@@ -62,6 +67,8 @@
 <script src="js/views/results.js"></script>
 <script src="js/views/comparison.js"></script>
 <script src="js/views/reports.js"></script>
+<script src="js/views/saved.js"></script>
+<script src="js/views/login.js"></script>
 <script src="js/views/help.js"></script>
 <script src="js/views/settings.js"></script>
 <!-- Router + actions (must load last) -->

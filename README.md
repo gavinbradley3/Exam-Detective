@@ -26,14 +26,21 @@ The app ships with a realistic demo (five Grade 8 ELA sections, 75 questions,
 three suspected key errors). Click **View Demo** on the landing page, or go
 through **New Analysis → Load the demo files** to try the whole workflow.
 
+**Use your own data:** export class results as **CSV** from your assessment
+tool and upload them in New Analysis (a sample CSV showing the accepted
+layouts is downloadable in the upload step). CSV is parsed for real;
+PDF/XLSX are accepted but clearly marked "not yet parsed". Every results
+page and export is labeled **Demo Data** or **Uploaded Data** — the two
+never mix.
+
 ## Test it
 
 ```
-node scripts/smoke-test.js
+node scripts/smoke-test.js   # renders every page (empty, demo, uploaded states)
+node scripts/csv-test.js     # CSV parser + data-honesty tests
 ```
 
-Renders every page and validates the demo data. Run it after changing anything
-in `js/`.
+Run both after changing anything in `js/`.
 
 ## Where things live
 
@@ -42,19 +49,26 @@ in `js/`.
 | `index.html` | The single page; navigation shell |
 | `css/main.css` | App styles (nav, cards, wizard, tables) |
 | `css/report.css` | Results page & report styles (the editorial report look) |
-| `js/data/demo-data.js` | Demo exam dataset — the data shape real parsing must produce |
-| `js/analysis.js` | Flag definitions, priority order, validation warning copy |
+| `js/data/demo-data.js` | Demo exam dataset — clearly labeled wherever it appears |
+| `js/csv-parse.js` | Real CSV parsing (student-rows & aggregate layouts) |
+| `js/analysis-builder.js` | Builds honest, rule-based analysis from uploaded data |
+| `js/data-store.js` | Active dataset (demo vs uploaded), local saves, JSON backup |
+| `js/analysis.js` | Flag definitions, priority order, helpers |
 | `js/report-blocks.js` | Shared report renderers (question cards, takeaway, …) |
 | `js/views/` | One file per page |
 | `js/app.js` | Hash router + event wiring |
+| `scripts/` | Test suites + CSV fixtures |
 | `BUILD_NOTES.md` | What's built, what's verified, what's next |
 | `PRODUCT_DECISIONS.md` | Why things are the way they are |
 | `DESIGN_REFERENCE_NOTES.md` | The design contract for the Results page & reports |
+| `AUTH_AND_STORAGE_PLAN.md` | The real path to Google login + cloud saving |
 
 ## Status
 
-The full UI and workflow run on demo data. Real file parsing (PDF/CSV/XLSX) and
-AI-assisted question judgment are the next features — see `BUILD_NOTES.md`.
+CSV uploads are parsed and analyzed for real (one class in = one class out —
+never demo numbers). PDF/XLSX parsing, exam-text analysis, and real Google
+login are not built yet, and the UI says so wherever it matters — see
+`BUILD_NOTES.md` for the honest list.
 
 ## Responsible use
 

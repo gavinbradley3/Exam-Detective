@@ -20,6 +20,8 @@ ED.actions = ED.actions || {};
     "results": ["results", "dashboard"],
     "comparison": ["comparison", "comparison"],
     "reports": ["reports", "reports"],
+    "saved": ["saved", "saved"],
+    "login": ["login", "login"],
     "help": ["help", "help"],
     "settings": ["settings", "settings"]
   };
@@ -46,6 +48,12 @@ ED.actions = ED.actions || {};
     if (html === "") return; // view redirected (e.g. wizard step 7)
     app.innerHTML = html;
     setActiveNav(entry[1]);
+    // Reflect the local profile in the nav (local storage, not real auth).
+    var signin = document.getElementById("nav-signin");
+    if (signin && window.ED.data) {
+      var p = ED.data.getProfile();
+      signin.textContent = p ? p.name : "Sign in";
+    }
     // New page: move focus + scroll to top (or to an in-page anchor).
     window.scrollTo(0, 0);
     app.focus({ preventScroll: true });

@@ -22,7 +22,7 @@ ED.views.landing = function () {
         '<p class="sub">Upload exam results from multiple classes. Exam Detective helps teachers spot possible key errors, weak questions, and class-wide patterns before an exam is reused.</p>' +
         '<div class="btn-row">' +
           '<a class="btn btn-primary btn-lg" href="#/new-analysis">Start New Analysis</a>' +
-          '<a class="btn btn-outline btn-lg" href="#/results">View Demo</a>' +
+          '<a class="btn btn-outline btn-lg" href="#/results/demo">View Demo</a>' +
         '</div>' +
       '</div>' +
     '</div>' +

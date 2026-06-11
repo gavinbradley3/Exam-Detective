@@ -1,86 +1,106 @@
 # Build Notes
 
-Last updated: 2026-06-11
+Last updated: 2026-06-11 (data-honesty + CSV parsing release)
 
 ## How to run it
 
 No installation, no build step.
 
-**Easiest:** double-click `index.html` — it opens in your browser and everything
-works except the "Download HTML" report button (browsers block file reading from
-disk; use Print → Save as PDF instead, which always works).
+**Easiest:** double-click `index.html` — everything works except the
+"Download HTML" report button (browsers block fetching files from disk;
+use Print → Save as PDF instead).
 
-**Best:** serve it locally so everything works, including HTML download:
+**Best:** serve it locally so everything works:
 
 ```
 cd Exam-Detective
 python3 -m http.server 8000
 ```
 
-then open http://localhost:8000 in your browser.
-(Any static file server works — GitHub Pages will host it as-is too.)
+then open http://localhost:8000.
 
-**Test:** `node scripts/smoke-test.js` renders every page and checks the demo
-data. Run it after any change to the `js/` folder.
+**Tests:**
+
+```
+node scripts/smoke-test.js   # renders every page, demo + uploaded + empty states
+node scripts/csv-test.js     # CSV parser + data-honesty tests (53 checks)
+```
+
+Run both after any change to `js/`.
 
 ## What has been built
 
-- **Landing page** — hero, how it works, what it finds, department comparison,
-  responsible use, FAQ.
-- **Dashboard** — summary cards, recent analysis, top flagged questions.
-- **New Analysis wizard** (7 steps) — setup, class result uploads with section
-  labels, exam/booklet uploads, answer key upload + editable 75-entry key grid,
-  mandatory Review Detected Data step with plain-English warnings, simulated
-  analysis run with progress, then Results.
-- **Results page** — the centerpiece. Editorial report layout mirroring the
-  uploaded reference: teacher review header, opening summary, key/scoring
-  warning, exam health snapshot, priority action list, passage-grouped question
-  cards (stat block, options with labels, The Problem, Immediate Action for This
-  Week, Fix for Next Year's Test Bank, suggested rewrites, collapsed Advanced
-  Details), key audit summary, department pattern summary, The Takeaway.
-- **Department Comparison** — overview cards, class table, 5×75 heat map with
-  legend + click-for-details (accessible labels, not color-only), widespread vs
-  section-specific lists, exportable department review list (CSV).
-- **Reports** — Teacher Review Report (closest match to the reference),
-  Department/Admin Summary, Question Bank Revision Report. Export: Print → PDF
-  and standalone HTML download.
-- **Help** — plain-language guide including what every label means.
-- **Settings** — defaults, delete wizard data, full local reset, responsible use.
-- **Demo data** — 5 Grade 8 ELA sections, 129 students, 75 questions, with key
-  error, accept-multiple, drop-from-scoring, hard-but-fair, watch-list, and
-  section-specific examples.
-- **Smoke test** — `scripts/smoke-test.js` (Node) renders every view and
-  validates the demo data shape.
+### Real (not simulated)
+- **CSV parsing** (`js/csv-parse.js`) — two layouts: one row per student
+  (Q1, Q2 … columns with answer letters or correct/incorrect marks) and one
+  row per question (Question + % Correct / counts, optional Key, Responses,
+  A–D distribution columns). Handles quoted fields, BOM, messy rows;
+  rejects unusable files with plain-English errors naming the needed columns.
+  Sample CSV downloadable from wizard Step 2. Test fixtures in `scripts/fixtures/`.
+- **Analysis from uploads** (`js/analysis-builder.js`) — every number and
+  sentence computed from parsed data. Transparent flag rules: Possible Key
+  Error (≥50% chose one non-keyed answer while the key drew ≤25%, or the
+  file's own key disagrees with the entered key), Watch List (≥60% combined
+  missed, or a ≥30-point section gap). It does NOT judge wording/fairness —
+  the output says explicitly that the exam text wasn't read.
+- **Data-source honesty** (`js/data-store.js`) — one ACTIVE dataset at a
+  time, demo or uploaded, never mixed. Every results page, report, dashboard,
+  comparison, and export carries a "Demo Data" or "Uploaded Data" banner with
+  file/student/section counts. If uploads exist but none parsed (PDF/XLSX
+  only), the run is blocked with an honest message — no fake results page.
+- **Manual answer key to 130 questions** — count field, paste-to-fill
+  (extracts letters from "A B C D…" or "1. A 2. B…"), grid grouped in rows
+  of ten. Demo key (75) loads only in demo mode.
+- **Settings start blank** — no pre-chosen subject/grade/format; a "still to
+  decide" status box; defaults the teacher sets seed the wizard. Wizard
+  Step 1 validates required fields (exam name, subject, grade) with friendly
+  messages and blocks continuing.
+- **Saved analyses** (`js/views/saved.js`) — save/reopen/delete in browser
+  localStorage (clearly labeled local, not cloud), plus JSON backup
+  export/import.
+- **Sign-in page** (`js/views/login.js`) — local profile works now; the
+  Google button is visibly disabled and labeled "not connected".
+  See AUTH_AND_STORAGE_PLAN.md for the real path.
+- **Exports** — Results-page "Export data (CSV)" exports the active dataset
+  with its source stated inside the file (DEMO files are marked in content
+  and filename). Department list CSV likewise. HTML report download and
+  Print → PDF kept working for demo and uploaded data.
+
+### Demo (clearly labeled wherever it appears)
+- The five-section Grade 8 ELA sample exam, loadable from wizard Step 2,
+  always wrapped in "Demo mode" / "Demo Data" banners.
 
 ## What was verified
 
-- `node scripts/smoke-test.js` passes (19 view renders + data checks).
-- All files serve with HTTP 200 from a local static server.
-- Results page sections match the design reference flow (see
-  DESIGN_REFERENCE_NOTES.md).
+- Both test suites pass: smoke (all views: empty, demo, uploaded states)
+  and csv-test (53 checks: parsing, one-class-in-one-class-out, student
+  totals from CSV, 130-question key incl. Q130 edit/save, blank settings,
+  step-1 validation, export source markers, local save/reopen/backup).
+- All files serve HTTP 200 from a local static server.
+- No secrets committed (no keys exist — the app is static; verified by search).
 
 ## Not yet connected / known issues
 
-- **Real file parsing is simulated.** Uploads are listed and labeled, but the
-  "detected data" always comes from the demo dataset. Real PDF/CSV/XLSX parsing
-  is the next major feature; it should produce the same data shape as
-  `js/data/demo-data.js` and the warning format in `js/analysis.js`
-  (`DEMO_WARNINGS`).
-- **AI-assisted question judgment is not connected.** Explanation text comes
-  from the demo data.
-- **DOCX export is planned, not built.** PDF (via print) and HTML work now.
-- **"Download HTML" needs a local server** (see How to run it above). Without
-  one it shows a friendly fallback message pointing at Print → Save as PDF.
-- Only one analysis (the demo) exists at a time — multi-analysis storage is a
-  later feature.
-- Not yet checked in a real browser on this machine (no browser in the build
-  environment). The smoke test covers rendering; click through the wizard,
-  heat map, exports, and printing in your browser as the first manual test.
+- **PDF and XLSX parsing** — accepted with an explicit "not yet parsed"
+  label; never analyzed. CSV is the only real path (deliberate: CSV first).
+- **Exam-text analysis** — Step 3 files are recorded by name only. Uploaded
+  data therefore gets no rewrites/"hard-but-fair" judgments, and the UI says so.
+- **Google login / cloud storage** — not wired (static site, no provider
+  keys). Local profile + local saves work now. Roadmap and exact setup:
+  AUTH_AND_STORAGE_PLAN.md.
+- **DOCX export** — still planned, shown as a dashed "DOCX — planned" tag,
+  not a button.
+- "Download HTML" needs a local server (falls back to a friendly message
+  pointing at Print → PDF).
+- Aggregate CSVs (one row per question): median shown as "—" and average
+  marked estimated — honest limits of that format.
+- Visual checks in a real browser are still pending (this environment has
+  no browser): wizard click-through, key grid at 130, heat map, mobile
+  widths, print output.
 
 ## Next safest step
 
-Open the site in a browser and click through: landing → New Analysis → Load the
-demo files → step through to Run Analysis → Results → Reports → print one.
-Anything that looks off is cheap to fix now. After that, the next build feature
-is real CSV parsing (CSV first — it's the simplest format) in a new
-`js/parsing.js`, feeding the same data shape as the demo file.
+Manual browser pass: upload `scripts/fixtures/sample-class-letters.csv`
+through the wizard (with key A B C D A B C D A B), confirm Results shows
+1 section / 12 students / Q5 key-error flag, then print it. After that,
+the next build feature is XLSX parsing (SheetJS) or real exam-text ingestion.

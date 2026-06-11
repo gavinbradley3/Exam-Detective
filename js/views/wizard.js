@@ -1,8 +1,8 @@
 /* New Analysis wizard — 7 steps.
-   Uploads are placeholders in this demo build: files are listed and
-   "detection" is simulated with the demo dataset, so the whole workflow
-   can be exercised end-to-end. Real parsing should plug in here later
-   (see BUILD_NOTES.md → "Not yet connected"). */
+   CSV uploads are REALLY parsed (js/csv-parse.js) and analyzed
+   (js/analysis-builder.js). PDF/XLSX files are accepted but clearly
+   marked "not yet parsed" and never analyzed. Demo mode and uploaded
+   mode are mutually exclusive so results can never silently mix. */
 
 window.ED = window.ED || {};
 ED.views = ED.views || {};
@@ -12,19 +12,20 @@ ED.actions = ED.actions || {};
   "use strict";
 
   var STORE_KEY = "examdetective.wizard";
+  var MAX_Q = 130; // manual answer key supports questions 1–130
 
   var STEPS = [
     "Analysis Setup",
     "Upload Class Results",
     "Upload Exam Questions",
-    "Upload Answer Key",
+    "Answer Key",
     "Review Detected Data",
     "Run Analysis",
     "View Results"
   ];
 
   // The demo answer key (75 letters). Includes the three suspect entries
-  // (Q33 B, Q36 D, Q66 A) so the key audit has something real to find.
+  // (Q33 B, Q36 D, Q66 A) so the demo key audit has something real to find.
   function demoKey() {
     var letters = ["A", "B", "C", "D"];
     var key = [];
@@ -35,11 +36,12 @@ ED.actions = ED.actions || {};
 
   function defaultState() {
     return {
-      setup: { examName: "", subject: "ELA", grade: "8", sections: "", notes: "" },
-      resultFiles: [],
+      setup: { examName: "", subject: "", grade: "", sections: "", notes: "" },
+      resultFiles: [],   // {name, label, status: parsed|unsupported|error, statusText, sections, format}
       examFiles: [],
       keySource: "",
       key: [],
+      keyCount: 0,
       demoLoaded: false
     };
   }
@@ -47,7 +49,10 @@ ED.actions = ED.actions || {};
   function getState() {
     try {
       var raw = localStorage.getItem(STORE_KEY);
-      return raw ? JSON.parse(raw) : defaultState();
+      var s = raw ? JSON.parse(raw) : defaultState();
+      // older saved states may miss newer fields
+      if (s.keyCount === undefined) s.keyCount = (s.key || []).length;
+      return s;
     } catch (e) {
       return defaultState();
     }
@@ -61,9 +66,99 @@ ED.actions = ED.actions || {};
     try { localStorage.removeItem(STORE_KEY); } catch (e) {}
   }
 
-  ED.wizard = { getState: getState, setState: setState, resetState: resetState, demoKey: demoKey };
+  ED.wizard = { getState: getState, setState: setState, resetState: resetState, demoKey: demoKey, MAX_Q: MAX_Q };
 
   var esc = function (s) { return ED.analysis.esc(s); };
+
+  // ---------- derived helpers ----------
+
+  function parsedSections(s) {
+    var out = [];
+    (s.resultFiles || []).forEach(function (f) {
+      if (f.status === "parsed" && f.sections) {
+        f.sections.forEach(function (sec) {
+          // the user's label wins over what the file said, when there's one section
+          var copy = Object.assign({}, sec);
+          if (f.label && f.sections.length === 1) copy.id = f.label;
+          out.push(copy);
+        });
+      }
+    });
+    return out;
+  }
+
+  function uploadMeta(s) {
+    var unparsed = (s.resultFiles || []).filter(function (f) { return f.status !== "parsed"; });
+    return {
+      filesUploaded: (s.resultFiles || []).length,
+      filesParsed: (s.resultFiles || []).filter(function (f) { return f.status === "parsed"; }).length,
+      unparsedFiles: unparsed.map(function (f) { return f.name; })
+    };
+  }
+
+  function keyEntered(s) {
+    return (s.key || []).filter(function (L) { return L; }).length;
+  }
+
+  // Cross-file checks shown on the Review step — all computed from real data.
+  function uploadedWarnings(s) {
+    var warns = [];
+    var secs = parsedSections(s);
+    var meta = uploadMeta(s);
+
+    (s.resultFiles || []).forEach(function (f) {
+      if (f.status === "unsupported") {
+        warns.push({ level: "warn", title: esc(f.name) + " won’t be analyzed", text: f.statusText });
+      } else if (f.status === "error") {
+        warns.push({ level: "alert", title: esc(f.name) + " couldn’t be read", text: f.statusText });
+      } else if (f.parseWarnings && f.parseWarnings.length) {
+        f.parseWarnings.forEach(function (w) {
+          warns.push({ level: "warn", title: esc(f.name), text: w });
+        });
+      }
+    });
+
+    // duplicate / missing section labels
+    var seen = {};
+    secs.forEach(function (sec) {
+      if (seen[sec.id]) {
+        warns.push({ level: "alert", title: "Duplicate class label", text: "Two files are both labeled “" + esc(sec.id) + "”. Give each class section its own label in Step 2, or their results will be merged." });
+      }
+      seen[sec.id] = true;
+    });
+
+    // question-count mismatches across sections
+    var counts = {};
+    secs.forEach(function (sec) { counts[sec.questionCount] = (counts[sec.questionCount] || []).concat(sec.id); });
+    if (Object.keys(counts).length > 1) {
+      warns.push({
+        level: "warn", title: "Question counts differ between files",
+        text: Object.keys(counts).map(function (c) { return counts[c].join("/") + " has " + c + " questions"; }).join("; ") +
+          ". Review the files before running the analysis."
+      });
+    }
+
+    // key checks
+    var maxQ = secs.reduce(function (m, sec) { return Math.max(m, sec.questionCount); }, 0);
+    var lettersMode = secs.some(function (sec) { return sec.mode === "letters"; });
+    var entered = keyEntered(s);
+    if (lettersMode && !entered) {
+      warns.push({ level: "alert", title: "Answer key needed", text: "Your files contain answer letters (A–D), which can only be scored against a key. Enter the key in Step 4 before running the analysis." });
+    } else if (entered && maxQ && entered < maxQ) {
+      warns.push({ level: "warn", title: "Key shorter than the exam", text: "The answer key has " + entered + " entries, but the files contain " + maxQ + " questions. Questions without a key entry " + (lettersMode ? "can’t be scored." : "can’t be key-checked.") });
+    }
+
+    secs.forEach(function (sec) {
+      if (!sec.responses) {
+        warns.push({ level: "warn", title: "No student count for " + esc(sec.id), text: "This file didn’t say how many students responded. Results will show 0 students for this section unless the file includes a Responses/Students column." });
+      }
+    });
+
+    if (!warns.length) {
+      warns.push({ level: "ok", title: "No problems detected", text: "Labels are unique, question counts line up, and everything needed to score is present." });
+    }
+    return warns;
+  }
 
   // ---------- shared chrome ----------
 
@@ -74,14 +169,14 @@ ED.actions = ED.actions || {};
         var cls = n === current ? "current" : (n < current ? "done" : "");
         return '<a role="listitem" class="wizard-step ' + cls + '" href="#/new-analysis/' + n + '"' +
           (n === current ? ' aria-current="step"' : '') + '>' +
-          '<span class="n" aria-hidden="true">' + n + '</span>' + label + '</a>';
+          '<span class="n" aria-hidden="true">' + (n < current ? "✓" : n) + '</span><span class="wizard-step-label">' + label + '</span></a>';
       }).join("") + '</div>';
   }
 
   function navButtons(current, nextLabel, nextAction) {
     var back = current > 1
       ? '<a class="btn btn-outline" href="#/new-analysis/' + (current - 1) + '">&larr; Back</a>'
-      : '<a class="btn btn-outline" href="#/dashboard">&larr; Back to Dashboard</a>';
+      : '<a class="btn btn-outline" href="#/dashboard">&larr; Dashboard</a>';
     var next = "";
     if (nextAction) {
       next = '<button class="btn btn-primary" data-action="' + nextAction + '">' + (nextLabel || "Continue") + ' &rarr;</button>';
@@ -91,34 +186,54 @@ ED.actions = ED.actions || {};
     return '<div class="wizard-nav">' + back + next + '</div>';
   }
 
-  function demoBanner(s) {
+  function modeBanner(s) {
     if (s.demoLoaded) {
-      return '<div class="notice ok"><span class="notice-title">Demo files loaded</span>Five Grade 8 ELA result files, the exam booklet, and the answer key are loaded so you can try the whole workflow. Replace them with your own files any time.</div>';
+      return '<div class="notice info"><span class="notice-title">Demo mode</span>' +
+        'You’re working with the built-in sample exam (five Grade 8 ELA sections). Uploading your own files will switch you out of demo mode. ' +
+        '<button class="btn btn-sm btn-outline" data-action="wizard-clear-demo">Leave demo mode</button></div>';
     }
+    if ((s.resultFiles || []).length) return ""; // working with real uploads — no demo pitch
     return '<div class="notice info"><span class="notice-title">Just exploring?</span>' +
       '<button class="btn btn-sm btn-outline" data-action="wizard-load-demo" style="margin-right:10px;">Load the demo files</button>' +
-      'Fills every step with a realistic five-class Grade 8 ELA exam so you can see how analysis works.</div>';
+      'Fills every step with a realistic five-class sample exam — clearly labeled as demo data the whole way through.</div>';
   }
 
   // ---------- steps ----------
 
-  function step1(s) {
+  function fieldError(id, msg) {
+    return msg ? '<p class="field-error" id="' + id + '-error">' + msg + '</p>' : "";
+  }
+
+  function step1(s, errors) {
+    errors = errors || {};
     var st = s.setup;
+    // Defaults the teacher chose in Settings seed blank fields (their
+    // decision, not ours — Settings starts blank).
+    var defaults = ED.settings ? ED.settings.get() : { subject: "", grade: "" };
+    var subjectVal = st.subject || defaults.subject || "";
+    var gradeVal = st.grade || defaults.grade || "";
     return (
       '<div class="card">' +
         '<h2>Step 1 · Analysis Setup</h2>' +
-        '<p class="mb-16">Tell us about the exam. You can change any of this later.</p>' +
-        '<form id="wizard-setup" onsubmit="return false;">' +
-          '<div class="field"><label for="w-exam">Exam name</label>' +
-            '<input type="text" id="w-exam" value="' + esc(st.examName) + '" placeholder="e.g. Grade 8 ELA Final Exam"></div>' +
-          '<div class="field"><label for="w-subject">Subject</label>' +
-            '<input type="text" id="w-subject" value="' + esc(st.subject) + '" placeholder="e.g. ELA"></div>' +
-          '<div class="field"><label for="w-grade">Grade level</label>' +
-            '<input type="text" id="w-grade" value="' + esc(st.grade) + '" placeholder="e.g. 8"></div>' +
-          '<div class="field"><label for="w-sections">Class sections</label>' +
-            '<input type="text" id="w-sections" value="' + esc(st.sections) + '" placeholder="e.g. 8A, 8B, 8C, 8D, 8E">' +
-            '<div class="hint">Separate sections with commas. One result file per section in the next step.</div></div>' +
-          '<div class="field"><label for="w-notes">Notes (optional)</label>' +
+        '<p class="mb-16">Tell us about the exam. Exam name, subject, and grade appear on every report, so they’re required.</p>' +
+        '<form id="wizard-setup" onsubmit="return false;" novalidate>' +
+          '<div class="field' + (errors.examName ? " has-error" : "") + '"><label for="w-exam">Exam name <span class="req">required</span></label>' +
+            '<input type="text" id="w-exam" value="' + esc(st.examName) + '" placeholder="e.g. Grade 8 ELA Final Exam"' + (errors.examName ? ' aria-describedby="w-exam-error" aria-invalid="true"' : '') + '>' +
+            fieldError("w-exam", errors.examName) + '</div>' +
+          '<div class="field-row">' +
+            '<div class="field' + (errors.subject ? " has-error" : "") + '"><label for="w-subject">Subject <span class="req">required</span></label>' +
+              '<input type="text" id="w-subject" value="' + esc(subjectVal) + '" placeholder="e.g. ELA"' + (errors.subject ? ' aria-describedby="w-subject-error" aria-invalid="true"' : '') + '>' +
+              (subjectVal && !st.subject ? '<div class="hint">From your Settings defaults — change it if this exam differs.</div>' : '') +
+              fieldError("w-subject", errors.subject) + '</div>' +
+            '<div class="field' + (errors.grade ? " has-error" : "") + '"><label for="w-grade">Grade level <span class="req">required</span></label>' +
+              '<input type="text" id="w-grade" value="' + esc(gradeVal) + '" placeholder="e.g. 8"' + (errors.grade ? ' aria-describedby="w-grade-error" aria-invalid="true"' : '') + '>' +
+              (gradeVal && !st.grade ? '<div class="hint">From your Settings defaults.</div>' : '') +
+              fieldError("w-grade", errors.grade) + '</div>' +
+          '</div>' +
+          '<div class="field"><label for="w-sections">Class sections <span class="opt">optional</span></label>' +
+            '<input type="text" id="w-sections" value="' + esc(st.sections) + '" placeholder="e.g. 8A, 8B, 8C">' +
+            '<div class="hint">Separate with commas. If you skip this, sections are taken from the uploaded files.</div></div>' +
+          '<div class="field"><label for="w-notes">Notes <span class="opt">optional</span></label>' +
             '<textarea id="w-notes" placeholder="Anything your future self should know about this exam">' + esc(st.notes) + '</textarea></div>' +
         '</form>' +
       '</div>' +
@@ -126,151 +241,258 @@ ED.actions = ED.actions || {};
     );
   }
 
-  function fileRows(files, withLabel) {
-    if (!files.length) return "";
-    return files.map(function (f, i) {
-      return '<div class="file-row">' +
-        '<span class="file-name">' + esc(f.name) + '</span>' +
-        (withLabel
-          ? '<label class="small" for="w-label-' + i + '">Class section:</label>' +
-            '<input type="text" id="w-label-' + i + '" data-change="wizard-label" data-index="' + i + '" value="' + esc(f.label || "") + '" placeholder="e.g. 8A" size="6">'
-          : '<span class="small muted">' + esc(f.kind || "supporting material") + '</span>') +
-        '<span class="file-status ' + (f.status === "ok" ? "ok" : "warn") + '">' +
-          (f.status === "ok" ? "✓ Question results detected" : "⚠ " + esc(f.statusText || "Could not read this file")) +
-        '</span>' +
-        '<button class="btn btn-sm btn-danger" data-action="wizard-remove-file" data-list="' + (withLabel ? "resultFiles" : "examFiles") + '" data-index="' + i + '">Remove</button>' +
-      '</div>';
-    }).join("");
+  function resultFileRow(f, i) {
+    var statusHtml;
+    if (f.status === "parsed") {
+      var students = (f.sections || []).reduce(function (a, sec) { return a + (sec.responses || 0); }, 0);
+      statusHtml = '<span class="file-status ok">✓ Parsed — ' + students + ' student' + (students === 1 ? "" : "s") + ', ' +
+        (f.sections || []).reduce(function (m, sec) { return Math.max(m, sec.questionCount); }, 0) + ' questions (' + esc(f.format) + ')</span>';
+    } else if (f.status === "unsupported") {
+      statusHtml = '<span class="file-status warn">◌ Accepted, not analyzed — ' + esc(f.statusText) + '</span>';
+    } else {
+      statusHtml = '<span class="file-status err">✕ ' + esc(f.statusText) + '</span>';
+    }
+    var labelHtml = "";
+    if (f.status === "parsed" && f.sections && f.sections.length === 1) {
+      labelHtml = '<label class="small" for="w-label-' + i + '">Class section:</label>' +
+        '<input type="text" id="w-label-' + i + '" data-change="wizard-label" data-index="' + i + '" value="' + esc(f.label || f.sections[0].id || "") + '" placeholder="e.g. 8A" size="6">';
+    } else if (f.status === "parsed") {
+      labelHtml = '<span class="small muted">' + f.sections.length + ' sections found in file: ' +
+        f.sections.map(function (sec) { return esc(sec.id); }).join(", ") + '</span>';
+    }
+    return '<div class="file-row ' + f.status + '">' +
+      '<span class="file-name">' + esc(f.name) + '</span>' + labelHtml + statusHtml +
+      '<button class="btn btn-sm btn-danger" data-action="wizard-remove-file" data-list="resultFiles" data-index="' + i + '">Remove</button>' +
+    '</div>';
   }
 
   function step2(s) {
+    var rows = (s.resultFiles || []).map(resultFileRow).join("");
     return (
-      demoBanner(s) +
+      modeBanner(s) +
       '<div class="card">' +
         '<h2>Step 2 · Upload Class Result Reports</h2>' +
-        '<p class="mb-16">Add one result report per class section — the export from your assessment tool. Supported: <b>PDF, CSV, XLSX</b>. Label each file with its class section.</p>' +
-        '<div class="upload-zone">' +
-          '<b>Choose result files</b><br>or drag them here' +
-          '<input type="file" multiple accept=".pdf,.csv,.xlsx" data-change="wizard-add-results" aria-label="Upload class result reports">' +
+        '<p class="mb-16">One result file per class section.</p>' +
+        '<div class="format-grid">' +
+          '<div class="format-cell live"><b>CSV</b><span>Parsed for real — results are read from your file</span></div>' +
+          '<div class="format-cell planned"><b>PDF · XLSX</b><span>Accepted but <b>not yet parsed</b> — they won’t be analyzed in this build</span></div>' +
         '</div>' +
-        '<div id="result-file-list">' + fileRows(s.resultFiles, true) + '</div>' +
-        (s.resultFiles.length
+        '<div class="upload-zone">' +
+          '<b>Choose result files</b><span class="muted"> — CSV recommended</span>' +
+          '<input type="file" multiple accept=".csv,.pdf,.xlsx" data-change="wizard-add-results" aria-label="Upload class result reports">' +
+          '<p class="small muted" style="margin-top:10px;">CSV layouts we read: one row per student (Q1, Q2, … columns with letters or correct/incorrect), or one row per question (Question + % Correct). ' +
+          '<button class="btn-link" data-action="wizard-sample-csv">Download a sample CSV</button></p>' +
+        '</div>' +
+        '<div id="result-file-list">' + rows + '</div>' +
+        ((s.resultFiles || []).length || s.demoLoaded
           ? ''
-          : '<p class="small muted mt-16">No result files yet. Upload your class reports, or load the demo files above to explore.</p>') +
+          : '<div class="empty-state"><b>No result files yet.</b><span>Upload your class CSV exports above — or load the demo files to explore first.</span></div>') +
       '</div>' +
       navButtons(2)
     );
   }
 
   function step3(s) {
+    var rows = (s.examFiles || []).map(function (f, i) {
+      return '<div class="file-row unsupported">' +
+        '<span class="file-name">' + esc(f.name) + '</span>' +
+        '<span class="file-status warn">◌ Name recorded for reference — exam text isn’t read in this build</span>' +
+        '<button class="btn btn-sm btn-danger" data-action="wizard-remove-file" data-list="examFiles" data-index="' + i + '">Remove</button>' +
+      '</div>';
+    }).join("");
     return (
-      demoBanner(s) +
+      modeBanner(s) +
       '<div class="card">' +
-        '<h2>Step 3 · Upload Exam Questions</h2>' +
-        '<p class="mb-16">Add the exam itself and any reading material — questions, reading booklet, passages, source texts. <b>These files help the system judge whether a question is clear, fair, and supported by the text.</b> This step is optional but makes recommendations much stronger.</p>' +
+        '<h2>Step 3 · Upload Exam Questions <span class="opt" style="font-size:12px;">optional</span></h2>' +
+        '<p class="mb-16">The exam, reading booklet, passages, or source texts.</p>' +
+        '<div class="notice warn"><span class="notice-title">Honest limitation</span>' +
+          'This build does <b>not</b> read exam text yet. Files you add here are listed with your analysis for reference only — they don’t change the results. When text analysis is built, this is where it will plug in.</div>' +
         '<div class="upload-zone">' +
-          '<b>Choose exam files</b><br>or drag them here' +
+          '<b>Choose exam files</b>' +
           '<input type="file" multiple accept=".pdf,.docx,.txt" data-change="wizard-add-exam" aria-label="Upload exam questions and reading material">' +
         '</div>' +
-        '<div id="exam-file-list">' + fileRows(s.examFiles, false) + '</div>' +
+        '<div id="exam-file-list">' + rows + '</div>' +
       '</div>' +
       navButtons(3)
     );
   }
 
-  function step4(s) {
-    var key = s.key && s.key.length ? s.key : null;
-    var grid = "";
-    if (key) {
-      var mismatches = { 33: true, 36: true, 66: true };
-      grid = '<h3 class="mt-24">Detected answer key — review or edit</h3>' +
-        '<p class="small muted">Cells outlined in red are questions where this key disagrees with keys detected inside the class result files. You’ll see the full comparison in the next step.</p>' +
-        '<div class="key-grid">' +
-        key.map(function (letter, i) {
-          var q = i + 1;
-          var mm = s.demoLoaded && mismatches[q];
-          return '<div class="key-cell' + (mm ? " mismatch" : "") + '">' +
-            '<span class="qn">Q' + q + '</span>' +
-            '<select data-change="wizard-key-edit" data-q="' + q + '" aria-label="Keyed answer for question ' + q + (mm ? " — possible mismatch" : "") + '">' +
-              ["A", "B", "C", "D"].map(function (L) {
-                return '<option' + (L === letter ? " selected" : "") + '>' + L + '</option>';
-              }).join("") +
-            '</select>' +
-          '</div>';
-        }).join("") +
-        '</div>';
+  function keyGrid(s) {
+    var n = s.keyCount || 0;
+    if (!n) return "";
+    var html = '<div class="key-groups">';
+    for (var start = 1; start <= n; start += 10) {
+      var end = Math.min(start + 9, n);
+      html += '<div class="key-group"><span class="key-group-label">' + start + '–' + end + '</span><div class="key-group-cells">';
+      for (var q = start; q <= end; q++) {
+        var val = s.key[q - 1] || "";
+        html += '<div class="key-cell' + (val ? "" : " unset") + '">' +
+          '<span class="qn">' + q + '</span>' +
+          '<select data-change="wizard-key-edit" data-q="' + q + '" aria-label="Keyed answer for question ' + q + '">' +
+            '<option value=""' + (val === "" ? " selected" : "") + '>–</option>' +
+            ["A", "B", "C", "D", "E"].map(function (L) {
+              return '<option' + (L === val ? " selected" : "") + '>' + L + '</option>';
+            }).join("") +
+          '</select></div>';
+      }
+      html += '</div></div>';
     }
+    html += '</div>';
+    var entered = keyEntered(s);
+    html += '<p class="small muted mt-8">' + entered + ' of ' + n + ' entries filled in' +
+      (entered < n ? ' — unfilled questions are marked with a dash.' : '.') + '</p>';
+    return html;
+  }
+
+  function step4(s) {
+    var detectedQ = parsedSections(s).reduce(function (m, sec) { return Math.max(m, sec.questionCount); }, 0);
     return (
-      demoBanner(s) +
+      modeBanner(s) +
       '<div class="card">' +
-        '<h2>Step 4 · Upload Answer Key</h2>' +
-        '<p class="mb-16">Upload the key document, or enter it by hand. <b>We compare this key against any keyed answers detected inside the class result files</b> — that comparison is how shifted or mistyped keys get caught.</p>' +
-        '<div class="btn-row">' +
-          '<label class="btn btn-outline" style="cursor:pointer;">Upload key file' +
-            '<input type="file" accept=".pdf,.csv,.xlsx,.docx" data-change="wizard-add-key" class="visually-hidden"></label>' +
-          '<button class="btn btn-outline" data-action="wizard-manual-key">Enter key manually</button>' +
+        '<h2>Step 4 · Answer Key</h2>' +
+        '<p class="mb-16">Enter the key by hand or paste it in. <b>The key is compared against your uploaded results</b> — that comparison is how wrong or shifted keys get caught. Up to ' + MAX_Q + ' questions.</p>' +
+
+        '<div class="key-controls">' +
+          '<div class="field" style="margin-bottom:0;"><label for="w-keycount">Number of questions</label>' +
+            '<input type="number" id="w-keycount" min="1" max="' + MAX_Q + '" value="' + (s.keyCount || "") + '" placeholder="' + (detectedQ || "e.g. 75") + '" data-change="wizard-key-count" style="max-width:120px;">' +
+            (detectedQ ? '<div class="hint">Your uploaded files contain ' + detectedQ + ' questions.</div>' : '') +
+          '</div>' +
+          '<div class="field" style="margin-bottom:0;flex-grow:1;"><label for="w-keypaste">Paste a key (fastest)</label>' +
+            '<textarea id="w-keypaste" rows="2" placeholder="Paste letters in order — e.g.  A B C D A …  or  1. A  2. B  3. C …"></textarea>' +
+            '<div class="hint">We pick out the letters A–E in order. <button class="btn-link" data-action="wizard-key-paste">Fill the key from this</button></div>' +
+          '</div>' +
         '</div>' +
+
         (s.keySource ? '<p class="small mt-16"><b>Key source:</b> ' + esc(s.keySource) + '</p>' : '') +
-        grid +
+        keyGrid(s) +
+        (s.keyCount ? '' : '<div class="empty-state mt-16"><b>No key yet.</b><span>Set the number of questions above to open the entry grid, or paste a key.</span></div>') +
       '</div>' +
       navButtons(4)
     );
   }
 
   function step5(s) {
-    if (!s.demoLoaded && !s.resultFiles.length) {
+    // ----- demo mode: the demo dataset, clearly labeled -----
+    if (s.demoLoaded) {
+      var an = ED.demo.analysis;
+      return (
+        '<div class="notice info"><span class="notice-title">Demo mode</span>Everything below comes from the built-in sample exam, including the warnings — this is what a real review step looks like.</div>' +
+        '<div class="card">' +
+          '<h2>Step 5 · Review Detected Data</h2>' +
+          '<h3>Exam</h3>' +
+          '<p>' + esc(s.setup.examName || an.examName) + ' · ' + esc(s.setup.subject || an.subject) + ' · Grade ' + esc(s.setup.grade || an.grade) + ' · <b>' + an.totalQuestions + ' questions detected</b> · Answer key: <b>detected (' + an.totalQuestions + ' entries)</b></p>' +
+          '<h3 class="mt-24">Class sections detected</h3>' +
+          '<div class="table-wrap mt-8"><table class="data">' +
+            '<thead><tr><th scope="col">Section</th><th scope="col" class="num">Responses</th><th scope="col" class="num">Questions found</th><th scope="col">Keyed answers in file</th><th scope="col">Parsing</th></tr></thead><tbody>' +
+            an.sections.map(function (sec) {
+              return '<tr><td><b>' + sec.id + '</b></td><td class="num">' + sec.responses + '</td><td class="num">' + an.totalQuestions + '</td><td>' + sec.keyVariant + '</td><td>' +
+                (sec.id === "8E" ? '<span class="file-status warn">⚠ One low-quality page</span>' : '<span class="file-status ok">✓ Clean</span>') +
+              '</td></tr>';
+            }).join("") +
+          '</tbody></table></div>' +
+          '<h3 class="mt-24">Checks &amp; warnings</h3>' +
+          ED.analysis.DEMO_WARNINGS.map(function (w) {
+            return '<div class="notice ' + w.level + '"><span class="notice-title">' + esc(w.title) + '</span>' + esc(w.text) + '</div>';
+          }).join("") +
+        '</div>' +
+        navButtons(5, "Looks right — continue")
+      );
+    }
+
+    // ----- uploaded mode -----
+    var secs = parsedSections(s);
+    var meta = uploadMeta(s);
+
+    if (!meta.filesUploaded) {
       return (
         '<div class="card"><h2>Step 5 · Review Detected Data</h2>' +
-        '<div class="notice warn"><span class="notice-title">Nothing to review yet</span>We could not detect question results because no files have been uploaded. Go back to Step 2 and upload your class result reports — or load the demo files.</div>' +
+        '<div class="empty-state"><b>Nothing to review yet.</b><span>No files have been uploaded. Go back to Step 2 and add your class result CSVs — or load the demo files to explore.</span></div>' +
         '</div>' +
         '<div class="wizard-nav"><a class="btn btn-outline" href="#/new-analysis/2">&larr; Back to uploads</a></div>'
       );
     }
-    var an = ED.demo.analysis;
-    var warnings = ED.analysis.DEMO_WARNINGS;
+
+    if (!secs.length) {
+      return (
+        '<div class="card"><h2>Step 5 · Review Detected Data</h2>' +
+        '<div class="notice alert"><span class="notice-title">No analyzable data</span>' +
+          'You uploaded ' + meta.filesUploaded + ' file' + (meta.filesUploaded === 1 ? "" : "s") + ', but none could be parsed. ' +
+          (meta.unparsedFiles.length ? '<b>' + meta.unparsedFiles.map(esc).join(", ") + '</b> — PDF and XLSX parsing isn’t built yet, and files with errors can’t be read. ' : '') +
+          'Export your results as <b>CSV</b> from your assessment tool to analyze them now. There’s a sample CSV in Step 2 showing the layouts we read.</div>' +
+        '</div>' +
+        '<div class="wizard-nav"><a class="btn btn-outline" href="#/new-analysis/2">&larr; Back to uploads</a></div>'
+      );
+    }
+
+    var totalStudents = secs.reduce(function (a, sec) { return a + (sec.responses || 0); }, 0);
     return (
       '<div class="card">' +
         '<h2>Step 5 · Review Detected Data</h2>' +
-        '<p class="mb-16">Before anything is analyzed, confirm what we found in your files. <b>Bad parsing creates bad analysis</b> — fix anything that looks wrong, then continue.</p>' +
+        '<p class="mb-16">This is what was actually read from your files — confirm it before anything is analyzed. <b>Bad parsing creates bad analysis.</b></p>' +
+
+        '<div class="src-banner uploaded" style="margin:0 0 18px;"><span class="src-chip">Uploaded Data</span>' +
+          '<span class="src-meta">' + meta.filesUploaded + ' file' + (meta.filesUploaded === 1 ? "" : "s") + ' uploaded · ' + meta.filesParsed + ' parsed · ' + totalStudents + ' students · ' + secs.length + ' section' + (secs.length === 1 ? "" : "s") + '</span></div>' +
 
         '<h3>Exam</h3>' +
-        '<p>' + esc(s.setup.examName || an.examName) + ' · ' + esc(s.setup.subject || an.subject) + ' · Grade ' + esc(s.setup.grade || an.grade) + ' · <b>' + an.totalQuestions + ' questions detected</b> · Answer key: <b>detected (75 entries)</b></p>' +
+        '<p>' + esc(s.setup.examName || "(no exam name — set it in Step 1)") +
+          (s.setup.subject ? ' · ' + esc(s.setup.subject) : '') +
+          (s.setup.grade ? ' · Grade ' + esc(s.setup.grade) : '') +
+          ' · Answer key: <b>' + (keyEntered(s) ? keyEntered(s) + " entries" : "not entered") + '</b></p>' +
 
         '<h3 class="mt-24">Class sections detected</h3>' +
         '<div class="table-wrap mt-8"><table class="data">' +
-          '<thead><tr><th scope="col">Section</th><th scope="col" class="num">Responses</th><th scope="col" class="num">Questions found</th><th scope="col">Keyed answers in file</th><th scope="col">Parsing</th></tr></thead><tbody>' +
-          an.sections.map(function (sec) {
-            return '<tr><td><b>' + sec.id + '</b></td><td class="num">' + sec.responses + '</td><td class="num">75</td><td>' + sec.keyVariant + '</td><td>' +
-              (sec.id === "8E" ? '<span class="file-status warn">⚠ One low-quality page</span>' : '<span class="file-status ok">✓ Clean</span>') +
-            '</td></tr>';
+          '<thead><tr><th scope="col">Section</th><th scope="col" class="num">Responses</th><th scope="col" class="num">Questions found</th><th scope="col">Answer format</th></tr></thead><tbody>' +
+          secs.map(function (sec) {
+            var fmt = sec.mode === "letters" ? "Answer letters (needs the key to score)"
+              : sec.mode === "correctness" ? "Correct / incorrect marks"
+              : "Aggregate (one row per question)";
+            return '<tr><td><b>' + esc(sec.id) + '</b></td><td class="num">' + (sec.responses || 0) + '</td><td class="num">' + sec.questionCount + '</td><td>' + fmt + '</td></tr>';
           }).join("") +
         '</tbody></table></div>' +
-        '<p class="small muted mt-8">Two different key copies were detected inside the result files (“Key copy 1” in 8A/8B/8D, “Key copy 2” in 8C/8E). That difference is exactly what the key audit will examine.</p>' +
 
         '<h3 class="mt-24">Checks &amp; warnings</h3>' +
-        warnings.map(function (w) {
-          return '<div class="notice ' + w.level + '"><span class="notice-title">' + esc(w.title) + '</span>' + esc(w.text) + '</div>';
+        uploadedWarnings(s).map(function (w) {
+          return '<div class="notice ' + w.level + '"><span class="notice-title">' + w.title + '</span>' + w.text + '</div>';
         }).join("") +
 
-        '<p class="small muted mt-16">Need to change something? Go back to re-upload files (Step 2), fix class labels (Step 2), or edit the answer key (Step 4).</p>' +
+        '<p class="small muted mt-16">Need to change something? Re-upload or relabel files in Step 2, or edit the key in Step 4.</p>' +
       '</div>' +
       navButtons(5, "Looks right — continue")
     );
   }
 
+  function canRun(s) {
+    if (s.demoLoaded) return { ok: true };
+    var secs = parsedSections(s);
+    var meta = uploadMeta(s);
+    if (!meta.filesUploaded) {
+      return { ok: false, why: "No files have been uploaded yet. Add your class result CSVs in Step 2, or load the demo files." };
+    }
+    if (!secs.length) {
+      return { ok: false, why: "None of the uploaded files could be parsed. PDF and XLSX parsing isn’t built yet — export your results as CSV to analyze them now. Exam Detective will not show results it didn’t actually compute." };
+    }
+    var lettersMode = secs.some(function (sec) { return sec.mode === "letters"; });
+    if (lettersMode && !keyEntered(s)) {
+      return { ok: false, why: "Your files contain answer letters, which can only be scored against an answer key. Enter the key in Step 4 first." };
+    }
+    return { ok: true };
+  }
+
   function step6(s) {
-    var ready = s.demoLoaded || s.resultFiles.length;
+    var gate = canRun(s);
     return (
       '<div class="card">' +
         '<h2>Step 6 · Run Analysis</h2>' +
-        (ready
-          ? '<p class="mb-16">We’ll review every question at three levels — each question on its own, each class section, and the combined department view — then flag anything that needs your attention.</p>' +
+        (gate.ok
+          ? (s.demoLoaded
+              ? '<div class="notice info"><span class="notice-title">Demo mode</span>This run opens the built-in sample results, clearly labeled as demo data.</div>'
+              : '<p class="mb-16">Every number in the results will come from your parsed CSV data. Flags use transparent rules (key conflicts, very high miss rates, big section gaps) — and the results say plainly what this build can’t judge without reading the exam text.</p>') +
             '<button class="btn btn-primary btn-lg" data-action="wizard-run" id="run-btn">Run Analysis</button>' +
             '<div class="progress-wrap" id="progress-wrap" hidden>' +
               '<div class="progress-bar" role="progressbar" aria-label="Analysis progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-bar"><div></div></div>' +
               '<ul class="progress-log" id="progress-log" aria-live="polite"></ul>' +
             '</div>'
-          : '<div class="notice warn"><span class="notice-title">Not ready yet</span>Upload class result files (Step 2) or load the demo files before running the analysis.</div>') +
+          : '<div class="notice alert"><span class="notice-title">Can’t run yet</span>' + gate.why + '</div>') +
       '</div>' +
       navButtons(6, null, null)
     );
@@ -286,11 +508,11 @@ ED.actions = ED.actions || {};
     return (
       '<div class="page"><div class="container narrow">' +
         '<div class="page-head">' +
-          '<div class="eyebrow">New Analysis</div>' +
+          '<div class="eyebrow">New Analysis · Step ' + step + ' of 7</div>' +
           '<h1>' + STEPS[step - 1] + '</h1>' +
         '</div>' +
         stepsBar(step) +
-        bodies[step - 1](s) +
+        bodies[step - 1](s, ED.wizard._setupErrors) +
       '</div></div>'
     );
   };
@@ -301,16 +523,21 @@ ED.actions = ED.actions || {};
     var s = getState();
     var an = ED.demo.analysis;
     s.demoLoaded = true;
+    s.resultFiles = [];   // demo and real uploads never mix
+    s.examFiles = [];
     s.setup = { examName: an.examName, subject: an.subject, grade: an.grade, sections: an.sections.map(function (x) { return x.id; }).join(", "), notes: s.setup.notes || "" };
-    s.resultFiles = an.sections.map(function (sec) {
-      return { name: sec.id + "_results.pdf", label: sec.id, status: "ok" };
-    });
-    s.examFiles = [
-      { name: "ELA8_Final_Exam_Booklet.pdf", kind: "exam questions", status: "ok" },
-      { name: "ELA8_Reading_Booklet.pdf", kind: "reading booklet", status: "ok" }
-    ];
-    s.keySource = "ELA8_Answer_Key.pdf (demo)";
+    s.keySource = "Demo answer key (75 entries)";
     s.key = demoKey();
+    s.keyCount = 75;
+    setState(s);
+    ED.app.rerender();
+  };
+
+  ED.actions["wizard-clear-demo"] = function () {
+    var s = getState();
+    s.demoLoaded = false;
+    s.setup = { examName: "", subject: "", grade: "", sections: "", notes: s.setup.notes || "" };
+    s.key = []; s.keyCount = 0; s.keySource = "";
     setState(s);
     ED.app.rerender();
   };
@@ -320,54 +547,94 @@ ED.actions = ED.actions || {};
     var v = function (id) { var el = document.getElementById(id); return el ? el.value.trim() : ""; };
     s.setup = { examName: v("w-exam"), subject: v("w-subject"), grade: v("w-grade"), sections: v("w-sections"), notes: v("w-notes") };
     setState(s);
+
+    var errors = {};
+    if (!s.setup.examName) errors.examName = "Give the exam a name — it appears at the top of every report.";
+    if (!s.setup.subject) errors.subject = "Enter the subject (e.g. ELA, Math).";
+    if (!s.setup.grade) errors.grade = "Enter the grade level (e.g. 8).";
+    if (Object.keys(errors).length) {
+      ED.wizard._setupErrors = errors;
+      ED.app.rerender();
+      ED.wizard._setupErrors = null;
+      return;
+    }
     location.hash = "#/new-analysis/2";
   };
 
-  function addFiles(listName, fileInput, withLabel) {
-    var s = getState();
-    var supported = withLabel ? ["pdf", "csv", "xlsx"] : ["pdf", "docx", "txt"];
-    Array.prototype.forEach.call(fileInput.files || [], function (f) {
-      var ext = (f.name.split(".").pop() || "").toLowerCase();
-      var entry = { name: f.name, label: "", kind: "supporting material" };
-      if (supported.indexOf(ext) === -1) {
-        entry.status = "warn";
-        entry.statusText = "Unsupported file type (." + ext + "). Try PDF, CSV, or XLSX.";
-      } else {
-        // Demo build: detection is simulated. Real parsing plugs in here.
-        entry.status = "ok";
-      }
-      s[listName].push(entry);
-    });
-    setState(s);
-    ED.app.rerender();
-  }
+  // ----- file uploads (Step 2): CSV parsed for real, PDF/XLSX honestly deferred -----
 
-  ED.actions["wizard-add-results"] = function (el) { addFiles("resultFiles", el, true); };
-  ED.actions["wizard-add-exam"] = function (el) { addFiles("examFiles", el, false); };
-
-  ED.actions["wizard-add-key"] = function (el) {
+  ED.actions["wizard-add-results"] = function (el) {
+    var files = Array.prototype.slice.call(el.files || []);
+    if (!files.length) return;
     var s = getState();
-    var f = el.files && el.files[0];
-    if (f) {
-      s.keySource = f.name + " (uploaded)";
-      if (!s.key.length) s.key = demoKey(); // demo build: simulated detection
-      setState(s);
-      ED.app.rerender();
+    if (s.demoLoaded) {
+      // switching from demo to real uploads — make the switch explicit
+      s.demoLoaded = false;
+      s.key = []; s.keyCount = 0; s.keySource = "";
+      s.switchedFromDemo = true;
     }
+    var pending = files.length;
+
+    function done() {
+      if (--pending === 0) { setState(s); ED.app.rerender(); }
+    }
+
+    files.forEach(function (f) {
+      var ext = (f.name.split(".").pop() || "").toLowerCase();
+      if (ext === "csv") {
+        var reader = new FileReader();
+        reader.onload = function () {
+          var defaultSection = f.name.replace(/\.[^.]+$/, "");
+          var res = ED.csv.parseResults(String(reader.result), { defaultSection: defaultSection });
+          if (res.ok) {
+            s.resultFiles.push({
+              name: f.name, label: res.sections.length === 1 ? res.sections[0].id : "",
+              status: "parsed", format: res.format,
+              sections: res.sections, parseWarnings: res.warnings
+            });
+          } else {
+            s.resultFiles.push({ name: f.name, status: "error", statusText: res.error });
+          }
+          done();
+        };
+        reader.onerror = function () {
+          s.resultFiles.push({ name: f.name, status: "error", statusText: "The file couldn’t be read from disk. Try re-selecting it." });
+          done();
+        };
+        reader.readAsText(f);
+      } else if (ext === "pdf" || ext === "xlsx") {
+        s.resultFiles.push({
+          name: f.name, status: "unsupported",
+          statusText: ext.toUpperCase() + " parsing isn’t built yet. Export this report as CSV to analyze it now."
+        });
+        done();
+      } else {
+        s.resultFiles.push({
+          name: f.name, status: "error",
+          statusText: "Unsupported file type (." + ext + "). Use a CSV export — PDF/XLSX are accepted but not yet analyzed."
+        });
+        done();
+      }
+    });
+    el.value = "";
   };
 
-  ED.actions["wizard-manual-key"] = function () {
-    var s = getState();
-    s.keySource = "Entered manually";
-    if (!s.key.length) s.key = demoKey();
-    setState(s);
-    ED.app.rerender();
+  ED.actions["wizard-sample-csv"] = function () {
+    var blob = new Blob([ED.csv.sampleCSV()], { type: "text/csv" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "exam-detective-sample-results.csv";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
   };
 
-  ED.actions["wizard-key-edit"] = function (el) {
+  ED.actions["wizard-add-exam"] = function (el) {
     var s = getState();
-    var q = parseInt(el.getAttribute("data-q"), 10);
-    if (q >= 1 && q <= s.key.length) { s.key[q - 1] = el.value; setState(s); }
+    Array.prototype.forEach.call(el.files || [], function (f) {
+      s.examFiles.push({ name: f.name, kind: "reference only" });
+    });
+    setState(s); ED.app.rerender();
+    el.value = "";
   };
 
   ED.actions["wizard-label"] = function (el) {
@@ -383,7 +650,51 @@ ED.actions = ED.actions || {};
     if (s[list] && s[list][i] !== undefined) { s[list].splice(i, 1); setState(s); ED.app.rerender(); }
   };
 
+  // ----- answer key (Step 4) -----
+
+  ED.actions["wizard-key-count"] = function (el) {
+    var s = getState();
+    var n = Math.min(Math.max(parseInt(el.value, 10) || 0, 0), MAX_Q);
+    s.keyCount = n;
+    s.key = s.key.slice(0, n);
+    while (s.key.length < n) s.key.push("");
+    if (n && !s.keySource) s.keySource = "Entered manually";
+    setState(s); ED.app.rerender();
+  };
+
+  ED.actions["wizard-key-edit"] = function (el) {
+    var s = getState();
+    var q = parseInt(el.getAttribute("data-q"), 10);
+    if (q >= 1 && q <= MAX_Q) {
+      while (s.key.length < q) s.key.push("");
+      s.key[q - 1] = el.value;
+      setState(s);
+    }
+  };
+
+  ED.actions["wizard-key-paste"] = function () {
+    var ta = document.getElementById("w-keypaste");
+    var s = getState();
+    if (!ta || !ta.value.trim()) return;
+    var letters = (ta.value.toUpperCase().match(/\b[A-E]\b/g) || []).slice(0, MAX_Q);
+    if (!letters.length) {
+      alert("We couldn’t find any answer letters (A–E) in what you pasted. Paste something like:  A B C D A …");
+      return;
+    }
+    s.key = letters;
+    s.keyCount = Math.max(s.keyCount || 0, letters.length);
+    while (s.key.length < s.keyCount) s.key.push("");
+    s.keySource = "Pasted (" + letters.length + " letters)";
+    setState(s); ED.app.rerender();
+  };
+
+  // ----- run (Step 6) -----
+
   ED.actions["wizard-run"] = function () {
+    var s = getState();
+    var gate = canRun(s);
+    if (!gate.ok) { ED.app.rerender(); return; }
+
     var btn = document.getElementById("run-btn");
     var wrap = document.getElementById("progress-wrap");
     var bar = document.getElementById("progress-bar");
@@ -392,18 +703,37 @@ ED.actions = ED.actions || {};
     if (btn) btn.disabled = true;
     wrap.hidden = false;
 
-    var steps = [
-      [15, "Reading question results from 5 class sections…"],
-      [35, "Comparing answer keys across files…"],
-      [55, "Checking answer patterns for each of 75 questions…"],
-      [75, "Looking for widespread vs. section-specific patterns…"],
-      [92, "Writing plain-English recommendations…"],
-      [100, "Done — 12 questions flagged, 3 possible key errors found."]
-    ];
+    var steps;
+    if (s.demoLoaded) {
+      ED.data.setActiveDemo();
+      steps = [
+        [30, "Opening the built-in demo dataset (5 sections, 129 students)…"],
+        [70, "Loading the sample review…"],
+        [100, "Done — opening demo results, labeled as demo data."]
+      ];
+    } else {
+      var secs = parsedSections(s);
+      var key = (s.key || []).slice(0, s.keyCount || s.key.length);
+      var analysis = ED.builder.build({
+        setup: s.setup,
+        sections: secs,
+        key: key.some(function (L) { return L; }) ? key : null,
+        meta: uploadMeta(s)
+      });
+      ED.data.setActiveUploaded(analysis);
+      var students = analysis.totalResponses;
+      steps = [
+        [25, "Scoring " + students + " student results across " + secs.length + " section" + (secs.length === 1 ? "" : "s") + "…"],
+        [55, "Checking " + analysis.totalQuestions + " questions against the key…"],
+        [85, "Applying flag rules (key conflicts, miss rates, section gaps)…"],
+        [100, "Done — " + analysis.flagged.length + " question" + (analysis.flagged.length === 1 ? "" : "s") + " flagged for review."]
+      ];
+    }
+
     var i = 0;
     (function tick() {
       if (i >= steps.length) {
-        setTimeout(function () { location.hash = "#/results"; }, 700);
+        setTimeout(function () { location.hash = "#/results"; }, 600);
         return;
       }
       var st = steps[i++];
@@ -412,7 +742,7 @@ ED.actions = ED.actions || {};
       var li = document.createElement("li");
       li.textContent = st[1];
       log.appendChild(li);
-      setTimeout(tick, 550);
+      setTimeout(tick, 450);
     })();
   };
 })();

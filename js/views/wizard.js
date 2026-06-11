@@ -1,8 +1,10 @@
 /* New Analysis wizard — 7 steps.
-   CSV uploads are REALLY parsed (js/csv-parse.js) and analyzed
-   (js/analysis-builder.js). PDF/XLSX files are accepted but clearly
-   marked "not yet parsed" and never analyzed. Demo mode and uploaded
-   mode are mutually exclusive so results can never silently mix. */
+   CSV and XLSX uploads are REALLY parsed (js/csv-parse.js,
+   js/xlsx-parse.js) and analyzed (js/analysis-builder.js). Answer keys
+   can be extracted from CSV/XLSX/text-based-PDF files (js/pdf-extract.js)
+   and always require review. Result PDFs are accepted but clearly marked
+   "not yet parsed" and never analyzed. Demo mode and uploaded mode are
+   mutually exclusive so results can never silently mix. */
 
 window.ED = window.ED || {};
 ED.views = ED.views || {};
@@ -246,7 +248,8 @@ ED.actions = ED.actions || {};
     if (f.status === "parsed") {
       var students = (f.sections || []).reduce(function (a, sec) { return a + (sec.responses || 0); }, 0);
       statusHtml = '<span class="file-status ok">✓ Parsed — ' + students + ' student' + (students === 1 ? "" : "s") + ', ' +
-        (f.sections || []).reduce(function (m, sec) { return Math.max(m, sec.questionCount); }, 0) + ' questions (' + esc(f.format) + ')</span>';
+        (f.sections || []).reduce(function (m, sec) { return Math.max(m, sec.questionCount); }, 0) + ' questions (' + esc(f.format) + ')' +
+        (f.sheetInfo ? ' · ' + esc(f.sheetInfo) : '') + '</span>';
     } else if (f.status === "unsupported") {
       statusHtml = '<span class="file-status warn">◌ Accepted, not analyzed — ' + esc(f.statusText) + '</span>';
     } else {
@@ -272,15 +275,15 @@ ED.actions = ED.actions || {};
       modeBanner(s) +
       '<div class="card">' +
         '<h2>Step 2 · Upload Class Result Reports</h2>' +
-        '<p class="mb-16">One result file per class section.</p>' +
+        '<p class="mb-16">One result file per class section (or one XLSX workbook with one sheet per section).</p>' +
         '<div class="format-grid">' +
-          '<div class="format-cell live"><b>CSV</b><span>Parsed for real — results are read from your file</span></div>' +
-          '<div class="format-cell planned"><b>PDF · XLSX</b><span>Accepted but <b>not yet parsed</b> — they won’t be analyzed in this build</span></div>' +
+          '<div class="format-cell live"><b>CSV · XLSX</b><span>Parsed for real — results are read straight from your file</span></div>' +
+          '<div class="format-cell planned"><b>PDF</b><span>Result PDFs are <b>not yet parsed</b> and won’t be analyzed. (Text-based PDF <i>answer keys</i> do work — Step 4.)</span></div>' +
         '</div>' +
         '<div class="upload-zone">' +
-          '<b>Choose result files</b><span class="muted"> — CSV recommended</span>' +
-          '<input type="file" multiple accept=".csv,.pdf,.xlsx" data-change="wizard-add-results" aria-label="Upload class result reports">' +
-          '<p class="small muted" style="margin-top:10px;">CSV layouts we read: one row per student (Q1, Q2, … columns with letters or correct/incorrect), or one row per question (Question + % Correct). ' +
+          '<b>Choose result files</b><span class="muted"> — CSV or XLSX</span>' +
+          '<input type="file" multiple accept=".csv,.xlsx,.pdf" data-change="wizard-add-results" aria-label="Upload class result reports">' +
+          '<p class="small muted" style="margin-top:10px;">Layouts we read: one row per student (Q1, Q2, … columns with letters or correct/incorrect), or one row per question (Question + % Correct). In XLSX workbooks, every sheet is checked and sheet names become section labels. ' +
           '<button class="btn-link" data-action="wizard-sample-csv">Download a sample CSV</button></p>' +
         '</div>' +
         '<div id="result-file-list">' + rows + '</div>' +
@@ -344,13 +347,42 @@ ED.actions = ED.actions || {};
     return html;
   }
 
+  // What happened the last time a key file was uploaded (review states).
+  function keyExtractionNotice(s) {
+    var ke = s.keyExtraction;
+    if (!ke) return "";
+    if (ke.error) {
+      return '<div class="notice alert"><span class="notice-title">Couldn’t read a key from ' + esc(ke.file) + '</span>' + esc(ke.error) + '</div>';
+    }
+    var bits = ['<b>' + ke.found + ' entr' + (ke.found === 1 ? "y" : "ies") + '</b> extracted from <b>' + esc(ke.file) + '</b>' + (ke.sheetName ? ' (sheet “' + esc(ke.sheetName) + '”)' : '') + '.'];
+    var level = "ok";
+    if (ke.missing && ke.missing.length) {
+      level = "warn";
+      var list = ke.missing.slice(0, 12).join(", ") + (ke.missing.length > 12 ? "…" : "");
+      bits.push('<b>Missing:</b> question' + (ke.missing.length === 1 ? "" : "s") + ' ' + list + ' — left blank below, not guessed.');
+    }
+    if (ke.conflicts && ke.conflicts.length) {
+      level = "warn";
+      bits.push('<b>Conflicting entries</b> for question' + (ke.conflicts.length === 1 ? "" : "s") + ' ' + ke.conflicts.join(", ") + ' — the most frequent letter was kept; double-check those.');
+    }
+    bits.push('Extraction is never trusted blindly — <b>review the grid below</b> before running the analysis.');
+    return '<div class="notice ' + level + '"><span class="notice-title">Key extracted — review required</span>' + bits.join(" ") + '</div>';
+  }
+
   function step4(s) {
     var detectedQ = parsedSections(s).reduce(function (m, sec) { return Math.max(m, sec.questionCount); }, 0);
     return (
       modeBanner(s) +
       '<div class="card">' +
         '<h2>Step 4 · Answer Key</h2>' +
-        '<p class="mb-16">Enter the key by hand or paste it in. <b>The key is compared against your uploaded results</b> — that comparison is how wrong or shifted keys get caught. Up to ' + MAX_Q + ' questions.</p>' +
+        '<p class="mb-16">Upload a key file, paste the key, or enter it by hand. <b>The key is compared against your uploaded results</b> — that comparison is how wrong or shifted keys get caught. Up to ' + MAX_Q + ' questions.</p>' +
+
+        '<div class="btn-row mb-16">' +
+          '<label class="btn btn-outline" style="cursor:pointer;">Upload key file (CSV · XLSX · PDF)' +
+            '<input type="file" accept=".csv,.xlsx,.pdf" data-change="wizard-key-file" class="visually-hidden" aria-label="Upload answer key file"></label>' +
+          '<span class="small muted">CSV/XLSX need Question + Key columns. PDF works for <b>text-based</b> key documents (“1. A”, “2) B” …) — scanned PDFs can’t be read (no OCR yet).</span>' +
+        '</div>' +
+        keyExtractionNotice(s) +
 
         '<div class="key-controls">' +
           '<div class="field" style="margin-bottom:0;"><label for="w-keycount">Number of questions</label>' +
@@ -529,6 +561,7 @@ ED.actions = ED.actions || {};
     s.keySource = "Demo answer key (75 entries)";
     s.key = demoKey();
     s.keyCount = 75;
+    s.keyExtraction = null;
     setState(s);
     ED.app.rerender();
   };
@@ -537,7 +570,7 @@ ED.actions = ED.actions || {};
     var s = getState();
     s.demoLoaded = false;
     s.setup = { examName: "", subject: "", grade: "", sections: "", notes: s.setup.notes || "" };
-    s.key = []; s.keyCount = 0; s.keySource = "";
+    s.key = []; s.keyCount = 0; s.keySource = ""; s.keyExtraction = null;
     setState(s);
     ED.app.rerender();
   };
@@ -570,7 +603,7 @@ ED.actions = ED.actions || {};
     if (s.demoLoaded) {
       // switching from demo to real uploads — make the switch explicit
       s.demoLoaded = false;
-      s.key = []; s.keyCount = 0; s.keySource = "";
+      s.key = []; s.keyCount = 0; s.keySource = ""; s.keyExtraction = null;
       s.switchedFromDemo = true;
     }
     var pending = files.length;
@@ -579,22 +612,25 @@ ED.actions = ED.actions || {};
       if (--pending === 0) { setState(s); ED.app.rerender(); }
     }
 
+    function pushParsed(f, res) {
+      if (res.ok) {
+        s.resultFiles.push({
+          name: f.name, label: res.sections.length === 1 ? res.sections[0].id : "",
+          status: "parsed", format: res.format,
+          sections: res.sections, parseWarnings: res.warnings,
+          sheetInfo: res.sheetCount ? res.parsedSheets.length + " of " + res.sheetCount + " sheet" + (res.sheetCount === 1 ? "" : "s") + " had results" : ""
+        });
+      } else {
+        s.resultFiles.push({ name: f.name, status: "error", statusText: res.error });
+      }
+    }
+
     files.forEach(function (f) {
       var ext = (f.name.split(".").pop() || "").toLowerCase();
       if (ext === "csv") {
         var reader = new FileReader();
         reader.onload = function () {
-          var defaultSection = f.name.replace(/\.[^.]+$/, "");
-          var res = ED.csv.parseResults(String(reader.result), { defaultSection: defaultSection });
-          if (res.ok) {
-            s.resultFiles.push({
-              name: f.name, label: res.sections.length === 1 ? res.sections[0].id : "",
-              status: "parsed", format: res.format,
-              sections: res.sections, parseWarnings: res.warnings
-            });
-          } else {
-            s.resultFiles.push({ name: f.name, status: "error", statusText: res.error });
-          }
+          pushParsed(f, ED.csv.parseResults(String(reader.result), { defaultSection: f.name.replace(/\.[^.]+$/, "") }));
           done();
         };
         reader.onerror = function () {
@@ -602,16 +638,27 @@ ED.actions = ED.actions || {};
           done();
         };
         reader.readAsText(f);
-      } else if (ext === "pdf" || ext === "xlsx") {
+      } else if (ext === "xlsx") {
+        var xreader = new FileReader();
+        xreader.onload = function () {
+          ED.xlsx.parseResults(xreader.result, { defaultSection: f.name.replace(/\.[^.]+$/, "") })
+            .then(function (res) { pushParsed(f, res); done(); });
+        };
+        xreader.onerror = function () {
+          s.resultFiles.push({ name: f.name, status: "error", statusText: "The file couldn’t be read from disk. Try re-selecting it." });
+          done();
+        };
+        xreader.readAsArrayBuffer(f);
+      } else if (ext === "pdf") {
         s.resultFiles.push({
           name: f.name, status: "unsupported",
-          statusText: ext.toUpperCase() + " parsing isn’t built yet. Export this report as CSV to analyze it now."
+          statusText: "Result PDFs aren’t parsed yet. Export this report as CSV or XLSX to analyze it now. (PDF answer keys are different — those work in Step 4.)"
         });
         done();
       } else {
         s.resultFiles.push({
           name: f.name, status: "error",
-          statusText: "Unsupported file type (." + ext + "). Use a CSV export — PDF/XLSX are accepted but not yet analyzed."
+          statusText: "Unsupported file type (." + ext + "). Use a CSV or XLSX export."
         });
         done();
       }
@@ -672,6 +719,56 @@ ED.actions = ED.actions || {};
     }
   };
 
+  // Key file upload: CSV / XLSX (Question + Key columns) or text-based PDF.
+  ED.actions["wizard-key-file"] = function (el) {
+    var f = el.files && el.files[0];
+    el.value = "";
+    if (!f) return;
+    var ext = (f.name.split(".").pop() || "").toLowerCase();
+
+    function apply(res, extra) {
+      var s = getState();
+      if (!res.ok) {
+        s.keyExtraction = { file: f.name, error: res.error };
+      } else {
+        s.key = res.key.slice(0, MAX_Q);
+        s.keyCount = Math.max(s.keyCount || 0, s.key.length);
+        while (s.key.length < s.keyCount) s.key.push("");
+        s.keySource = f.name + " — extracted, review below";
+        s.keyExtraction = {
+          file: f.name,
+          found: res.found,
+          missing: res.missing || [],
+          conflicts: (res.conflicts || []).map(function (c) { return c.q; }),
+          sheetName: res.sheetName || (extra && extra.sheetName) || ""
+        };
+      }
+      setState(s);
+      ED.app.rerender();
+    }
+
+    if (ext === "csv") {
+      var reader = new FileReader();
+      reader.onload = function () {
+        apply(ED.csv.extractKeyFromTable(ED.csv.parseTable(String(reader.result))));
+      };
+      reader.onerror = function () { apply({ ok: false, error: "The file couldn’t be read from disk. Try re-selecting it." }); };
+      reader.readAsText(f);
+    } else if (ext === "xlsx") {
+      var xr = new FileReader();
+      xr.onload = function () { ED.xlsx.extractKey(xr.result).then(apply); };
+      xr.onerror = function () { apply({ ok: false, error: "The file couldn’t be read from disk. Try re-selecting it." }); };
+      xr.readAsArrayBuffer(f);
+    } else if (ext === "pdf") {
+      var pr = new FileReader();
+      pr.onload = function () { ED.pdf.extractKey(pr.result).then(apply); };
+      pr.onerror = function () { apply({ ok: false, error: "The file couldn’t be read from disk. Try re-selecting it." }); };
+      pr.readAsArrayBuffer(f);
+    } else {
+      apply({ ok: false, error: "Unsupported file type (." + ext + "). Use CSV, XLSX, or a text-based PDF." });
+    }
+  };
+
   ED.actions["wizard-key-paste"] = function () {
     var ta = document.getElementById("w-keypaste");
     var s = getState();
@@ -685,6 +782,7 @@ ED.actions = ED.actions || {};
     s.keyCount = Math.max(s.keyCount || 0, letters.length);
     while (s.key.length < s.keyCount) s.key.push("");
     s.keySource = "Pasted (" + letters.length + " letters)";
+    s.keyExtraction = null;
     setState(s); ED.app.rerender();
   };
 

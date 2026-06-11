@@ -1,6 +1,6 @@
 # Build Notes
 
-Last updated: 2026-06-11 (data-honesty + CSV parsing release)
+Last updated: 2026-06-11 (XLSX parsing + PDF answer-key extraction pass)
 
 ## How to run it
 
@@ -22,15 +22,37 @@ then open http://localhost:8000.
 **Tests:**
 
 ```
-node scripts/smoke-test.js   # renders every page, demo + uploaded + empty states
-node scripts/csv-test.js     # CSV parser + data-honesty tests (53 checks)
+node scripts/smoke-test.js     # renders every page, demo + uploaded + empty states
+node scripts/csv-test.js       # CSV parser + data-honesty tests (53 checks)
+node scripts/xlsx-pdf-test.js  # XLSX + PDF-key parsing tests (40 checks)
 ```
 
-Run both after any change to `js/`.
+Run all three after any change to `js/`. Binary fixtures are committed;
+regenerate them with `node scripts/make-fixtures.js` only if their content
+needs to change.
 
 ## What has been built
 
 ### Real (not simulated)
+- **XLSX parsing** (`js/xlsx-parse.js`) — reads the ZIP container and sheet
+  XML directly using the platform-native `DecompressionStream` (modern
+  browsers + Node 18+; older browsers get an honest error). **No library
+  added.** Every sheet in a workbook is checked; sheet names become section
+  labels; non-result sheets are reported as skipped. Reuses the exact same
+  shape detection as CSV (`ED.csv.parseRows`), so both formats behave
+  identically.
+- **PDF answer-key extraction** (`js/pdf-extract.js`) — for **text-based**
+  PDFs only: inflates FlateDecode content streams and reads the standard
+  text operators, then extracts "1. A / 2) B / Q3: C" patterns. Reports
+  found/missing/conflicting entries and always demands review. **Scanned
+  (image-only) PDFs are detected and refused** with an explicit "no OCR"
+  message; custom-font-encoded PDFs are detected (low printable ratio) and
+  refused rather than producing garbage. Result PDFs (not keys) remain
+  unparsed and labeled as such.
+- **Key file upload** (wizard Step 4) — CSV/XLSX (Question + Key columns)
+  or text-based PDF; extraction fills the grid, never silently — a review
+  notice lists entry count, missing questions (left blank, not guessed),
+  and conflicts.
 - **CSV parsing** (`js/csv-parse.js`) — two layouts: one row per student
   (Q1, Q2 … columns with answer letters or correct/incorrect marks) and one
   row per question (Question + % Correct / counts, optional Key, Responses,
@@ -81,8 +103,13 @@ Run both after any change to `js/`.
 
 ## Not yet connected / known issues
 
-- **PDF and XLSX parsing** — accepted with an explicit "not yet parsed"
-  label; never analyzed. CSV is the only real path (deliberate: CSV first).
+- **Result PDFs** — accepted with an explicit "not yet parsed" label; never
+  analyzed. (PDF *answer keys* ARE parsed when the PDF is text-based.)
+- **Scanned-PDF OCR** — not built; scans are detected and refused honestly.
+- **PDF exam-question / reading-passage extraction** — not built.
+- **XLSX fixtures are self-generated** (`scripts/make-fixtures.js` follows
+  the ECMA-376/ZIP spec), so a real Excel- or Google-Sheets-exported .xlsx
+  should be part of the first browser test.
 - **Exam-text analysis** — Step 3 files are recorded by name only. Uploaded
   data therefore gets no rewrites/"hard-but-fair" judgments, and the UI says so.
 - **Google login / cloud storage** — not wired (static site, no provider
@@ -100,7 +127,9 @@ Run both after any change to `js/`.
 
 ## Next safest step
 
-Manual browser pass: upload `scripts/fixtures/sample-class-letters.csv`
-through the wizard (with key A B C D A B C D A B), confirm Results shows
-1 section / 12 students / Q5 key-error flag, then print it. After that,
-the next build feature is XLSX parsing (SheetJS) or real exam-text ingestion.
+Manual browser pass: upload `scripts/fixtures/student-rows.xlsx` through the
+wizard, then upload `scripts/fixtures/answer-key.pdf` in Step 4 — confirm the
+key fills with a review notice, and Results shows 1 section / 12 students /
+Q5 key-error flag. Also test one REAL Excel- or Sheets-exported .xlsx (the
+committed fixtures are self-generated). After that, the next build candidates
+are exam-text ingestion or Supabase cloud saving (AUTH_AND_STORAGE_PLAN.md).

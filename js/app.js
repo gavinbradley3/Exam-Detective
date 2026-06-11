@@ -42,7 +42,21 @@ ED.actions = ED.actions || {};
   function render() {
     var app = document.getElementById("app");
     var info = parseHash();
-    var entry = ROUTES[info.route] || ROUTES[""];
+    var entry = ROUTES[info.route];
+    if (!entry) {
+      // In-page anchors like #q36 (Results "View details") or #help-files
+      // (Help contents) land here on hashchange. If the element exists on
+      // the current page, scroll to it — do NOT re-route to the homepage.
+      var anchorId = (location.hash || "").replace(/^#\/?/, "");
+      var target = anchorId && document.getElementById(anchorId);
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (target.tabIndex < 0) target.tabIndex = -1; // focusable for a11y
+        target.focus({ preventScroll: true });
+        return;
+      }
+      entry = ROUTES[""];
+    }
     var viewFn = ED.views[entry[0]];
     var html = viewFn ? viewFn(info.param) : "";
     if (html === "") return; // view redirected (e.g. wizard step 7)

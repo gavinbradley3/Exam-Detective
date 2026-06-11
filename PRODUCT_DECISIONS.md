@@ -21,13 +21,18 @@ computed numbers. Judgments that require reading the exam (rewrites,
 that the exam text wasn't analyzed. Demo data keeps its rich narrative
 because it represents what the product will do once text analysis exists.
 
-## CSV first
+## CSV first, then XLSX and PDF keys — without adding dependencies
 
-CSV is the only really-parsed upload format (student-rows and aggregate
-layouts). PDF/XLSX are accepted but visibly labeled "not yet parsed" rather
-than disabled — teachers can stage files now, and the label sets honest
-expectations. Rationale: every assessment tool exports CSV, and one real
-path beats three fake ones.
+CSV came first; XLSX results and PDF answer-key extraction are now also
+real. Both use the platform-native `DecompressionStream` (all modern
+browsers, Node 18+) instead of a vendored library — XLSX is read as
+ZIP + sheet XML, PDF keys as FlateDecode streams + text operators. This
+keeps the no-build, no-dependency constraint intact; very old browsers get
+an honest "can't unpack this here" error instead of a polyfill. Limits are
+stated in the UI: PDF key extraction is text-based-PDF only, scanned PDFs
+are refused (no OCR), custom-encoded PDFs are refused rather than guessed,
+and extracted keys always require review. Result PDFs remain unparsed and
+labeled. Rationale unchanged: one real path beats three fake ones.
 
 ## Settings (and the wizard) start blank
 

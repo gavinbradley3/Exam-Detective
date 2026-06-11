@@ -298,16 +298,14 @@ window.ED = window.ED || {};
     };
   }
 
-  // ---------- entry point ----------
+  // ---------- entry points ----------
 
-  function parseResults(text, opts) {
+  // Shape-detect and parse a table of rows (header + data). Shared by
+  // CSV (text) and XLSX (sheets) so both formats get identical handling.
+  function parseRows(table, opts) {
     opts = opts || {};
-    var table;
-    try { table = parseTable(text); }
-    catch (e) { return { ok: false, error: "We couldn’t read this file as a CSV at all. Try re-exporting it from your assessment tool." }; }
-
-    if (table.length < 2) {
-      return { ok: false, error: "This file has no data rows. A results CSV needs a header row plus at least one row of results." };
+    if (!table || table.length < 2) {
+      return { ok: false, error: "This file has no data rows. A results file needs a header row plus at least one row of results." };
     }
     var header = table[0];
     var rows = table.slice(1);
@@ -320,11 +318,46 @@ window.ED = window.ED || {};
 
     return {
       ok: false,
-      error: "We couldn’t find question results in this file. Exam Detective reads two CSV layouts: " +
+      error: "We couldn’t find question results in this file. Exam Detective reads two layouts: " +
         "(1) one row per student with columns like “Q1, Q2, Q3 …” containing answer letters or correct/incorrect marks, or " +
         "(2) one row per question with a “Question” column plus “% Correct” (or “Correct”/“Incorrect” counts). " +
         "Open the file in a spreadsheet and check the column headers, or try the sample CSV from the upload step."
     };
+  }
+
+  function parseResults(text, opts) {
+    var table;
+    try { table = parseTable(text); }
+    catch (e) { return { ok: false, error: "We couldn’t read this file as a CSV at all. Try re-exporting it from your assessment tool." }; }
+    return parseRows(table, opts || {});
+  }
+
+  // Try to read an ANSWER KEY from a table: needs a question column and
+  // a key/answer column (the aggregate layout, results optional).
+  // Returns { ok, key: ["A",...], found, maxQ } or { ok:false, error }.
+  function extractKeyFromTable(table) {
+    if (!table || table.length < 2) {
+      return { ok: false, error: "This file has no data rows to read a key from." };
+    }
+    var header = table[0];
+    var qCol = findCol(header, [/^q(uestion)?\s*(#|no\.?|number)?$/, /^item$/]);
+    var keyCol = findCol(header, [/^key(ed)?(\s*answer)?$/, /^answer(\s*key)?$/, /^correct\s*answer$/]);
+    if (qCol === -1 || keyCol === -1) {
+      return { ok: false, error: "To read an answer key, the file needs a “Question” column and a “Key” (or “Answer”) column." };
+    }
+    var key = [];
+    var found = 0;
+    table.slice(1).forEach(function (r) {
+      var qn = parseInt(String(r[qCol]).replace(/[^0-9]/g, ""), 10);
+      var L = norm(r[keyCol]);
+      if (qn >= 1 && qn <= MAX_QUESTIONS && LETTER.test(L)) {
+        key[qn - 1] = L.toUpperCase();
+        found++;
+      }
+    });
+    if (!found) return { ok: false, error: "We found the key column but no readable entries (expected letters A–E next to question numbers)." };
+    for (var i = 0; i < key.length; i++) if (key[i] === undefined) key[i] = "";
+    return { ok: true, key: key, found: found, maxQ: key.length };
   }
 
   // ---------- sample CSV (downloadable from the upload step) ----------
@@ -343,7 +376,9 @@ window.ED = window.ED || {};
   ED.csv = {
     MAX_QUESTIONS: MAX_QUESTIONS,
     parseTable: parseTable,
+    parseRows: parseRows,
     parseResults: parseResults,
+    extractKeyFromTable: extractKeyFromTable,
     sampleCSV: sampleCSV
   };
 })();

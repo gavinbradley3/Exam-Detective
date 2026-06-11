@@ -26,6 +26,8 @@ var root = path.join(__dirname, "..");
   "js/data/demo-data.js",
   "js/analysis.js",
   "js/csv-parse.js",
+  "js/xlsx-parse.js",
+  "js/pdf-extract.js",
   "js/analysis-builder.js",
   "js/data-store.js",
   "js/report-blocks.js",
@@ -79,7 +81,8 @@ for (var step = 1; step <= 6; step++) {
   check("wizard step " + step, ED.views.wizard(String(step)), ["Step " + step]);
 }
 check("wizard step 1 required fields", ED.views.wizard("1"), ["required", "Exam name"]);
-check("wizard step 2 honest formats", ED.views.wizard("2"), ["not yet parsed", "sample CSV", "No result files yet"]);
+check("wizard step 2 honest formats", ED.views.wizard("2"), ["CSV · XLSX", "not yet parsed", "sample CSV", "No result files yet"]);
+check("wizard step 4 key upload", ED.views.wizard("4"), ["Upload key file", "text-based", "no OCR yet"]);
 check("wizard step 5 (no files)", ED.views.wizard("5"), ["Nothing to review yet"]);
 check("wizard step 6 (blocked)", ED.views.wizard("6"), ["Can’t run yet"]);
 
@@ -106,6 +109,16 @@ ED.wizard.setState(ws);
 check("wizard step 2 (uploaded)", ED.views.wizard("2"), ["8B-results.csv", "Parsed — 12 students", "Accepted, not analyzed"]);
 check("wizard step 5 (uploaded)", ED.views.wizard("5"), ["Uploaded Data", "12 students", "won’t be analyzed"], ["129", "Possible key mismatch"]);
 check("wizard step 6 (uploaded)", ED.views.wizard("6"), ["Run Analysis"], ["Demo mode"]);
+
+ws = ED.wizard.getState();
+ws.keyExtraction = { file: "key.pdf", found: 8, missing: [6, 7], conflicts: [3], sheetName: "" };
+ED.wizard.setState(ws);
+check("wizard step 4 extraction review", ED.views.wizard("4"), ["Key extracted — review required", "6, 7", "Conflicting entries", "review the grid"]);
+ws.keyExtraction = { file: "scan.pdf", error: "This PDF appears to be a scan." };
+ED.wizard.setState(ws);
+check("wizard step 4 extraction failure", ED.views.wizard("4"), ["Couldn’t read a key from scan.pdf"]);
+ws.keyExtraction = null;
+ED.wizard.setState(ws);
 
 console.log("— Results & reports from UPLOADED data —");
 var analysis = ED.builder.build({

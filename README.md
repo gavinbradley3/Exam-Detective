@@ -26,21 +26,24 @@ The app ships with a realistic demo (five Grade 8 ELA sections, 75 questions,
 three suspected key errors). Click **View Demo** on the landing page, or go
 through **New Analysis → Load the demo files** to try the whole workflow.
 
-**Use your own data:** export class results as **CSV** from your assessment
-tool and upload them in New Analysis (a sample CSV showing the accepted
-layouts is downloadable in the upload step). CSV is parsed for real;
-PDF/XLSX are accepted but clearly marked "not yet parsed". Every results
-page and export is labeled **Demo Data** or **Uploaded Data** — the two
-never mix.
+**Use your own data:** export class results as **CSV or XLSX** from your
+assessment tool and upload them in New Analysis (a sample CSV showing the
+accepted layouts is downloadable in the upload step). Both are parsed for
+real — in XLSX workbooks each sheet becomes a class section. Answer keys can
+be uploaded as CSV/XLSX or **text-based PDF** (scanned PDFs are refused
+honestly — no OCR yet). Result PDFs are accepted but clearly marked "not yet
+parsed". Every results page and export is labeled **Demo Data** or
+**Uploaded Data** — the two never mix.
 
 ## Test it
 
 ```
-node scripts/smoke-test.js   # renders every page (empty, demo, uploaded states)
-node scripts/csv-test.js     # CSV parser + data-honesty tests
+node scripts/smoke-test.js     # renders every page (empty, demo, uploaded states)
+node scripts/csv-test.js       # CSV parser + data-honesty tests
+node scripts/xlsx-pdf-test.js  # XLSX + PDF answer-key parsing tests
 ```
 
-Run both after changing anything in `js/`.
+Run all three after changing anything in `js/`.
 
 ## Where things live
 
@@ -51,6 +54,8 @@ Run both after changing anything in `js/`.
 | `css/report.css` | Results page & report styles (the editorial report look) |
 | `js/data/demo-data.js` | Demo exam dataset — clearly labeled wherever it appears |
 | `js/csv-parse.js` | Real CSV parsing (student-rows & aggregate layouts) |
+| `js/xlsx-parse.js` | Real XLSX parsing (ZIP + sheet XML, no libraries) |
+| `js/pdf-extract.js` | PDF text & answer-key extraction (text-based PDFs; scans refused) |
 | `js/analysis-builder.js` | Builds honest, rule-based analysis from uploaded data |
 | `js/data-store.js` | Active dataset (demo vs uploaded), local saves, JSON backup |
 | `js/analysis.js` | Flag definitions, priority order, helpers |
@@ -65,10 +70,11 @@ Run both after changing anything in `js/`.
 
 ## Status
 
-CSV uploads are parsed and analyzed for real (one class in = one class out —
-never demo numbers). PDF/XLSX parsing, exam-text analysis, and real Google
-login are not built yet, and the UI says so wherever it matters — see
-`BUILD_NOTES.md` for the honest list.
+CSV and XLSX uploads are parsed and analyzed for real (one class in = one
+class out — never demo numbers), and answer keys can be extracted from
+CSV/XLSX/text-based-PDF files with mandatory review. Result-PDF parsing, OCR,
+exam-text analysis, and real Google login are not built yet, and the UI says
+so wherever it matters — see `BUILD_NOTES.md` for the honest list.
 
 ## Responsible use
 

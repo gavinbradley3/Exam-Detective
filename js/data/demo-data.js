@@ -22,7 +22,7 @@ window.ED = window.ED || {};
 
   // ----- Passage groups (how the exam is organized) -----
   var groups = [
-    { roman: "I",    title: "The Strange Orchid",                          range: [1, 10] },
+    { roman: "I",    title: "The Strange Orchid",                          range: [1, 20] },
     { roman: "II",   title: "My Left Foot",                                range: [21, 30] },
     { roman: "III",  title: "“Time” by Lisa Sloman",             range: [31, 35] },
     { roman: "IV",   title: "Unicorn-like Blind Fish",                     range: [36, 45] },
@@ -31,14 +31,16 @@ window.ED = window.ED || {};
     { roman: "VII",  title: "The Power of Love to Transform and to Heal",  range: [61, 70] },
     { roman: "VIII", title: "Calvin and Hobbes (Spaceman Spiff)",          range: [71, 75] }
   ];
+  // stable ids — group membership must survive JSON round-trips (saved analyses)
+  groups.forEach(function (g, i) { g.id = i; });
 
-  // Group for the questions that fall outside the flagged passages
-  // (questions 11–20 belong to a second Orchid set in the demo exam).
+  // Questions 1–20 are the two Orchid sets; every demo question falls
+  // inside one of the groups above.
   function groupForQuestion(n) {
     for (var i = 0; i < groups.length; i++) {
       if (n >= groups[i].range[0] && n <= groups[i].range[1]) return groups[i];
     }
-    return { roman: "I", title: "The Strange Orchid", range: [1, 20] };
+    return groups[0];
   }
 
   // ----- Per-section percent-missed for flagged / notable questions -----

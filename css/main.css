@@ -221,6 +221,8 @@ a { color: var(--teal); }
 .flag-fair         { border-color: var(--green-border); color: var(--green); background: var(--green-bg); }
 .flag-watch        { border-color: var(--slate-border); color: var(--muted); background: var(--chip); }
 .flag-ok           { border-color: var(--green-border); color: var(--green); background: #fff; }
+/* evidence-availability chips (uploaded data): neutral, informational */
+.flag-evidence     { border-color: #c9d4dc; color: #44606f; background: #f2f6f8; border-style: dashed; }
 
 /* ---------- Tables ---------- */
 

@@ -190,6 +190,7 @@ window.ED = window.ED || {};
         '</div>' +
         '<div class="qflagline">' + flagBadge(f.flag) +
           (f.secondaryFlags || []).map(flagBadge).join(" ") +
+          (f.evidence ? ' <span class="flag flag-evidence" title="What uploaded evidence is available for this question">' + A().esc(f.evidence) + '</span>' : '') +
         '</div>' +
       '</div>';
 
@@ -239,6 +240,11 @@ window.ED = window.ED || {};
     var html = "";
     an.groups.forEach(function (g) {
       var qs = an.flagged.filter(function (f) {
+        // each question belongs to exactly one group — matched by stable id
+        // (object identity doesn't survive the JSON round-trip of saved
+        // analyses), with range matching as the legacy fallback
+        var fg = an.allQuestions[f.number - 1] && an.allQuestions[f.number - 1].group;
+        if (fg && fg.id !== undefined && g.id !== undefined) return fg.id === g.id;
         return f.number >= g.range[0] && f.number <= g.range[1];
       });
       if (!qs.length) return;

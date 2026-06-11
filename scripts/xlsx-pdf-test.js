@@ -26,6 +26,7 @@ var root = path.join(__dirname, "..");
   "js/csv-parse.js",
   "js/xlsx-parse.js",
   "js/pdf-extract.js",
+  "js/exam-parse.js",
   "js/analysis-builder.js",
   "js/data-store.js",
   "js/report-blocks.js",
@@ -156,6 +157,84 @@ async function main() {
   ok(ckey.ok === true && ckey.key.join("") === "ABC", "key extracted from a CSV key file");
   var noKey = ED.csv.extractKeyFromTable(ED.csv.parseTable("Foo,Bar\n1,2"));
   ok(noKey.ok === false && /Question.*Key|Key.*Question/i.test(noKey.error), "missing columns explained");
+
+  // ---------- 11. Exam-question PDF parsing ----------
+  console.log("Exam-question PDF:");
+  var exam = await ED.examText.parseExamPDF(fixture("exam-questions.pdf"));
+  ok(exam.ok === true && exam.isExam === true, "text-based exam PDF parses");
+  ok(exam.found === 5, "5 questions found");
+  ok(exam.complete === 4, "4 questions have full answer choices");
+  ok(exam.incomplete.join(",") === "5", "Q5 honestly reported as partial (stem only)");
+  ok(exam.questions[1].stem === "What color was the door at the farmhouse?", "Q1 stem extracted verbatim");
+  ok(exam.questions[3].options.A === "unwilling", "Q3 option A extracted verbatim");
+  ok(exam.sections.length === 1 && exam.sections[0].title === "The Story" &&
+     exam.sections[0].from === 1 && exam.sections[0].to === 5, "section marker “The Story (Questions 1-5)” detected");
+  var examScan = await ED.examText.parseExamPDF(fixture("scanned.pdf"));
+  ok(examScan.ok === false && examScan.kind === "scanned", "scanned exam PDF refused honestly (no OCR)");
+  var examEnc = await ED.examText.parseExamPDF(fixture("encoded.pdf"));
+  ok(examEnc.ok === false && examEnc.kind === "encoded", "custom-encoded PDF refused instead of producing garbage");
+
+  // ---------- 12. Passage PDF parsing + explicit-evidence linking ----------
+  console.log("Passage PDFs & linking:");
+  var passage = await ED.examText.parsePassagePDF(fixture("passage.pdf"), "passage");
+  ok(passage.ok === true && passage.title === "The Story", "passage title read from the first line");
+  ok(passage.wordCount > 50, "passage word count computed");
+  var unmatched = await ED.examText.parsePassagePDF(fixture("passage-unmatched.pdf"), "x");
+  ok(unmatched.ok === true && unmatched.title === "A Different Tale", "second passage parsed");
+
+  var evidence = ED.examText.assemble([
+    { kind: "exam", name: "exam-questions.pdf", exam: exam },
+    { kind: "passage", name: "passage.pdf", passage: passage },
+    { kind: "passage", name: "passage-unmatched.pdf", passage: unmatched }
+  ]);
+  ok(evidence.coverage.withText === 5, "evidence covers 5 questions");
+  var linked = evidence.passages.filter(function (p) { return p.linked; });
+  ok(linked.length === 1 && linked[0].title === "The Story" && linked[0].from === 1 && linked[0].to === 5,
+    "“The Story” linked to Q1–5 via the exam's explicit marker only");
+  ok(evidence.passages.some(function (p) { return p.title === "A Different Tale" && !p.linked; }),
+    "passage without a marker stays unmatched — no guessed links");
+  ok(evidence.warnings.some(function (w) { return /unmatched|couldn’t be confidently linked/i.test(w); }),
+    "unmatched passage produces a needs-review warning");
+
+  // ---------- 13. Evidence flows into the analysis (no inventions) ----------
+  console.log("Analysis with text evidence:");
+  // 10-question results, exam text covers Q1–5; Q5 of the results data is
+  // the key-error question and Q5 of the exam fixture is the PARTIAL one —
+  // a deliberate overlap to test partial-evidence labeling.
+  var evAnalysis = ED.builder.build({
+    setup: { examName: "Evidence Test", subject: "ELA", grade: "8" },
+    sections: res.sections, // student-rows.xlsx: 12 students, Q5/Q9 flags
+    key: KEY,
+    meta: { filesUploaded: 1, filesParsed: 1, unparsedFiles: [] },
+    examEvidence: evidence
+  });
+  ok(evAnalysis.totalResponses === 12 && evAnalysis.sections.length === 1, "still 12 students / 1 section — no demo fallback with evidence attached");
+  var evQ5 = evAnalysis.flagged.filter(function (f) { return f.number === 5; })[0];
+  ok(!!evQ5 && evQ5.question.indexOf("What is the tone of the final paragraph?") !== -1, "flagged Q5 shows its real extracted stem");
+  ok(evQ5.evidence === "Partial text — needs review", "partial extraction labeled “needs review” on the card");
+  var evQ9 = evAnalysis.flagged.filter(function (f) { return f.number === 9; })[0];
+  ok(!!evQ9 && evQ9.evidence === "Data only", "question with no uploaded text labeled “Data only”");
+  ok(evQ9.question.indexOf("no question text uploaded") !== -1, "textless question says so instead of inventing wording");
+  ok(evAnalysis.groups.length === 2 && evAnalysis.groups[0].title === "The Story" && evAnalysis.groups[0].passage === "The Story",
+    "results grouped by the exam's section marker, with the linked passage attached");
+  ok(evAnalysis.openingSummary.indexOf("5 of 10") !== -1, "opening summary states real text coverage (5 of 10)");
+  ok(evAnalysis.evidenceSummary && evAnalysis.evidenceSummary.passages.length === 2, "evidence summary carries both passages");
+
+  // a fully-covered flagged question quotes its options
+  var fullKey = ["B", "B", "A", "B", "A"]; // forces Q1 decisive-vote flag (key B, ~92% chose A)
+  var evAnalysis2 = ED.builder.build({
+    setup: { examName: "Evidence Test 2" },
+    sections: (await ED.xlsx.parseResults(fixture("multi-sheet.xlsx"), {})).sections,
+    key: fullKey,
+    meta: { filesUploaded: 1, filesParsed: 1, unparsedFiles: [] },
+    examEvidence: evidence
+  });
+  var evQ1 = evAnalysis2.flagged.filter(function (f) { return f.number === 1; })[0];
+  ok(!!evQ1 && evQ1.question.indexOf("What color was the door") !== -1, "complete question quotes its stem");
+  ok(evQ1.problem.indexOf("From your uploaded exam:") !== -1 && evQ1.problem.indexOf("Red") !== -1,
+    "problem text quotes the real answer-choice wording as evidence");
+  ok(evQ1.evidence === "Question + passage available", "linked passage reflected in the evidence label");
+  ok(evQ1.options.some(function (o) { return o.text.indexOf("Blue") !== -1; }), "option rows carry real choice text with vote shares");
 
   // ---------- result ----------
   if (failures.length) {

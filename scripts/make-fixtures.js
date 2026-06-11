@@ -243,8 +243,65 @@ fs.writeFileSync(path.join(outDir, "answer-key-partial.pdf"), makePdf(textConten
 // 7. "Scanned" PDF: image XObject only, no text operators
 fs.writeFileSync(path.join(outDir, "scanned.pdf"), makePdf("q\n612 0 0 792 0 0 cm\n/Im1 Do\nQ", { imageObj: true }));
 
+// 8. Exam-questions PDF: section marker + 4 complete questions + 1 partial
+//    (Q5 has a stem but no readable answer choices).
+var examLines = [
+  "Grade 8 ELA Unit Test",
+  "The Story (Questions 1-5)",
+  "1. What color was the door at the farmhouse?",
+  "A. Red",
+  "B. Blue",
+  "C. Green",
+  "D. Yellow",
+  "2. Why did Sam leave the kitchen before sunrise?",
+  "A. He was scared of the storm",
+  "B. He was late for the market",
+  "C. He heard the dog barking",
+  "D. He wanted to surprise his sister",
+  "3. The word \"reluctant\" in paragraph 2 means -",
+  "A. unwilling",
+  "B. excited",
+  "C. confused",
+  "D. careless",
+  "4. Which sentence best states the main idea?",
+  "A. Sam regrets leaving the farm",
+  "B. Change feels frightening before it feels right",
+  "C. Storms can damage old houses",
+  "D. Sisters always argue",
+  "5. What is the tone of the final paragraph?"
+];
+fs.writeFileSync(path.join(outDir, "exam-questions.pdf"), makePdf(textContent(examLines)));
+
+// 9. Reading passage PDF whose title matches the exam's section marker
+var passageLines = [
+  "The Story",
+  "by A. Writer",
+  "It was a cold morning when Sam first noticed the blue door at the",
+  "end of the lane. He had walked past the farmhouse a hundred times,",
+  "reluctant to stop, reluctant to knock. The storm the night before",
+  "had stripped the paint from the fence but left the door untouched.",
+  "By the time the market bells rang, Sam had made up his mind: some",
+  "changes feel frightening before they feel right."
+];
+fs.writeFileSync(path.join(outDir, "passage.pdf"), makePdf(textContent(passageLines)));
+
+// 10. A passage with no range marker and no matching section -> unmatched
+var unmatchedLines = [
+  "A Different Tale",
+  "Nobody in the village remembered when the lighthouse had last been",
+  "lit, and nobody could agree on who kept the key."
+];
+fs.writeFileSync(path.join(outDir, "passage-unmatched.pdf"), makePdf(textContent(unmatchedLines)));
+
+// 11. Custom-encoded PDF: text operators whose bytes aren't readable text
+//     (simulates subset fonts with custom CMaps -> must be refused)
+var junk = "";
+for (var jb = 0; jb < 400; jb++) junk += String.fromCharCode(128 + (jb * 7) % 120);
+fs.writeFileSync(path.join(outDir, "encoded.pdf"), makePdf("BT\n/F1 12 Tf\n72 720 Td\n(" + junk.replace(/\\/g, "").replace(/\(/g, "").replace(/\)/g, "") + ") Tj\nET"));
+
 console.log("Fixtures written to scripts/fixtures/:");
 ["student-rows.xlsx", "question-rows.xlsx", "multi-sheet.xlsx", "answer-key.xlsx",
- "answer-key.pdf", "answer-key-partial.pdf", "scanned.pdf"].forEach(function (f) {
+ "answer-key.pdf", "answer-key-partial.pdf", "scanned.pdf",
+ "exam-questions.pdf", "passage.pdf", "passage-unmatched.pdf", "encoded.pdf"].forEach(function (f) {
   console.log("  " + f + " (" + fs.statSync(path.join(outDir, f)).size + " bytes)");
 });

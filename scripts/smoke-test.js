@@ -28,6 +28,7 @@ var root = path.join(__dirname, "..");
   "js/csv-parse.js",
   "js/xlsx-parse.js",
   "js/pdf-extract.js",
+  "js/exam-parse.js",
   "js/analysis-builder.js",
   "js/data-store.js",
   "js/report-blocks.js",
@@ -130,7 +131,42 @@ var analysis = ED.builder.build({
 ED.data.setActiveUploaded(analysis);
 check("results (uploaded)", ED.views.results(), [
   "Uploaded Data", "12 students", "1 section", "8C-results.pdf",
-  "Priority Action List", "The Takeaway", "hasn’t read the exam text"
+  "Priority Action List", "The Takeaway", "hasn’t read this question’s text", "Data only"
+], ["129 students", "Demo Data", "Strange Orchid"]);
+
+// ---- uploaded data WITH exam-text evidence ----
+var examTxt = "The Story (Questions 1-5)\n" +
+  "1. What color was the door?\nA. Red\nB. Blue\nC. Green\nD. Yellow\n" +
+  "5. What is the tone of the final paragraph?\n";
+var passageTxt = "The Story\nIt was a cold morning when Sam first saw the blue door at the end of the lane and decided to knock.";
+var wsT = ED.wizard.getState();
+wsT.examFiles = [
+  { name: "exam.pdf", status: "parsed", kind: "exam", rawText: examTxt, exam: ED.examText.parseExamText(examTxt) },
+  { name: "story.txt", status: "parsed", kind: "passage", rawText: passageTxt, passage: ED.examText.parsePassageText(passageTxt, "story") },
+  { name: "scan.pdf", status: "error", kind: "unreadable", statusText: "This PDF appears to be a scan." }
+];
+ED.wizard.setState(wsT);
+check("wizard step 3 (parsed files)", ED.views.wizard("3"), [
+  "questions extracted", "1 partial", "Treat as:", "Passage “The Story”", "scan.pdf", "appears to be a scan"
+]);
+check("wizard step 5 (exam text)", ED.views.wizard("5"), [
+  "Exam text detected", "Linked to Questions 1–5", "covers part of the exam"
+]);
+var evidence = ED.examText.assemble(wsT.examFiles.filter(function (f) { return f.status === "parsed"; }));
+var analysisWithText = ED.builder.build({
+  setup: wsT.setup,
+  sections: parsed.sections,
+  key: ws.key,
+  meta: { filesUploaded: 1, filesParsed: 1, unparsedFiles: [] },
+  examEvidence: evidence
+});
+ED.data.setActiveUploaded(analysisWithText);
+// flagged Q5 carries the partial extracted stem; Q9 has no text at all
+// (full quoted-options coverage lives in scripts/xlsx-pdf-test.js)
+check("results (uploaded + text evidence)", ED.views.results(), [
+  "What is the tone of the final paragraph?", "The Story",
+  "Partial text — needs review", "partial extraction — answer-choice text couldn’t be read",
+  "Data only", "quoted verbatim"
 ], ["129 students", "Demo Data", "Strange Orchid"]);
 check("dashboard (uploaded)", ED.views.dashboard(), ["Unit 3 Test", "Uploaded Data"], ["129"]);
 check("comparison (uploaded, 1 section)", ED.views.comparison(), ["Needs at least two sections", "Uploaded Data"], ["129"]);

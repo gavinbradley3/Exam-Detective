@@ -72,13 +72,22 @@ window.ED = window.ED || {};
   //   setup: { examName, subject, grade, examType },
   //   sections: [parsed section objects],
   //   key: ["A","C",...] | null,
-  //   meta: { filesUploaded, filesParsed, unparsedFiles: [names] }
+  //   meta: { filesUploaded, filesParsed, unparsedFiles: [names] },
+  //   examEvidence: output of ED.examText.assemble(...) | null
+  //     (real extracted question wording / passages; never invented)
   // }
   function build(input) {
     var setup = input.setup || {};
     var sections = input.sections || [];
     var key = input.key && input.key.length ? input.key : null;
     var meta = input.meta || { filesUploaded: 0, filesParsed: 0, unparsedFiles: [] };
+    var ev = input.examEvidence && input.examEvidence.coverage && input.examEvidence.coverage.withText
+      ? input.examEvidence : null;
+    var esc = ED.analysis.esc;
+    var trunc = ED.examText ? ED.examText.trunc : function (s) { return s; };
+
+    // Extracted wording for one question, or null. Never invented.
+    function qText(q) { return ev && ev.questions[q] ? ev.questions[q] : null; }
 
     sections.forEach(function (s) { if (s.mode === "letters") scoreLettersAgainstKey(s, key); });
 
@@ -120,9 +129,32 @@ window.ED = window.ED || {};
     var medians = secSummaries.filter(function (s) { return s.median !== null; }).map(function (s) { return s.median; });
     var combinedMedian = medians.length ? median(medians) : null;
 
+    // ---- groups: from explicit exam section markers when available ----
+    var ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"];
+    var groups = [];
+    if (ev && ev.sections.length) {
+      ev.sections.forEach(function (sec, i) {
+        groups.push({
+          id: i,
+          roman: ROMAN[i] || String(i + 1),
+          title: sec.title || "Section " + (i + 1),
+          range: [sec.from, sec.to],
+          passage: sec.passage ? sec.passage.title : null
+        });
+      });
+      groups.push({ id: groups.length, roman: ROMAN[groups.length] || "•", title: "Other questions", range: [1, totalQuestions], catchAll: true });
+    } else {
+      groups.push({ id: 0, roman: "I", title: "All exam questions (uploaded results)", range: [1, totalQuestions] });
+    }
+    function groupFor(q) {
+      for (var i = 0; i < groups.length; i++) {
+        if (!groups[i].catchAll && q >= groups[i].range[0] && q <= groups[i].range[1]) return groups[i];
+      }
+      return groups[groups.length - 1];
+    }
+
     // ---- per-question grid ----
     var allQuestions = [];
-    var group = { roman: "I", title: "All exam questions (uploaded results)", range: [1, totalQuestions] };
     for (var q = 1; q <= totalQuestions; q++) {
       var missedBySection = {};
       var vals = [];
@@ -134,7 +166,7 @@ window.ED = window.ED || {};
       });
       allQuestions.push({
         number: q,
-        group: group,
+        group: groupFor(q),
         missedBySection: missedBySection,
         minMissed: vals.length ? Math.min.apply(null, vals) : 0,
         maxMissed: vals.length ? Math.max.apply(null, vals) : 0,
@@ -195,7 +227,10 @@ window.ED = window.ED || {};
           secondaryFlags: ["Immediate Action"],
           confidence: keyedShare <= 10 ? "High" : "Medium",
           pattern: mostShare + "% of students chose " + most + ", while the keyed answer " + keyed + " drew only " + keyedShare + "%.",
-          problem: "<b>" + mostShare + "% of students chose " + most + "</b> while the keyed answer (" + keyed + ") drew only " + keyedShare + "%. When one non-keyed answer wins this decisively, the key document is the usual suspect. <b>Exam Detective has not read the exam text</b>, so this is a data signal, not a verdict — check answer " + most + " against the question before rescoring.",
+          problem: "<b>" + mostShare + "% of students chose " + most + "</b> while the keyed answer (" + keyed + ") drew only " + keyedShare + "%. When one non-keyed answer wins this decisively, the key document is the usual suspect. " +
+            (qText(q)
+              ? "The question’s wording from your uploaded exam is quoted below — read it and check whether " + most + " is the better answer before rescoring."
+              : "<b>Exam Detective has not read this question’s text</b> (none was uploaded), so this is a data signal, not a verdict — check answer " + most + " against the question before rescoring."),
           immediate: "<b class=\"act\">Check the key for this question against the exam text.</b> If " + most + " is correct, rescore with " + most + ". If the key is right after all, this question goes on the revision list instead.",
           nextYearNote: "Verify this entry in the key document against the source. If the key was wrong, no question change is needed."
         };
@@ -223,7 +258,10 @@ window.ED = window.ED || {};
           pattern: aq.combinedMissed + "% of students missed this question" + (sections.length > 1 ? " across " + sections.length + " sections" : "") + ".",
           problem: "<b>" + aq.combinedMissed + "% of students missed this question.</b>" +
             (most && keyed && most !== keyed ? " The most common answer was " + most + " (" + mostShare + "%), against a keyed answer of " + keyed + " (" + keyedShare + "%)." : "") +
-            " A miss rate this high can mean a flawed question, a key problem, or simply a hard skill. <b>Exam Detective hasn’t read the exam text</b>, so it can’t tell which — read the question against the passage to decide.",
+            " A miss rate this high can mean a flawed question, a key problem, or simply a hard skill. " +
+            (qText(q)
+              ? "The question’s wording is quoted below — judging whether it’s broken or just hard is a read, not a statistic."
+              : "<b>Exam Detective hasn’t read this question’s text</b> (none was uploaded), so it can’t tell which — read the question against the passage to decide."),
           immediate: "<b>Review before any grading change.</b> Read the question and the keyed answer against the exam text. If the key holds up, this is “hard but fair” and needs no rescore.",
           nextYearNote: "If review shows a wording or distractor problem, rebuild the question before the exam is reused."
         };
@@ -253,13 +291,41 @@ window.ED = window.ED || {};
         if (!f.classesAffected.length) f.classesAffected = sections.map(function (s) { return s.id; });
         f.keyedAnswer = keyed || "—";
         f.mostChosen = most || "—";
-        f.question = "Question " + q + " <span style=\"font-weight:400;font-size:13px;color:#6a776f;\">(question text isn’t in a results CSV — flagged from the response data alone)</span>";
+
+        // ---- evidence from uploaded exam text (quoted verbatim, never invented) ----
+        var qt = qText(q);
+        var grp = groupFor(q);
+        if (qt) {
+          f.question = esc(qt.stem) +
+            (qt.complete ? "" : " <span style=\"font-weight:400;font-size:13px;color:#6a776f;\">(partial extraction — answer-choice text couldn’t be read)</span>");
+          f.evidence = !qt.complete ? "Partial text — needs review"
+            : (grp.passage ? "Question + passage available" : "Question text available");
+          var evBits = [];
+          if (keyed && qt.options[keyed]) evBits.push("the keyed answer " + keyed + " reads “" + esc(trunc(qt.options[keyed], 120)) + "”");
+          if (most && most !== keyed && qt.options[most]) evBits.push("the most-chosen answer " + most + " reads “" + esc(trunc(qt.options[most], 120)) + "”");
+          if (evBits.length) {
+            f.problem += " <b>From your uploaded exam:</b> " + evBits.join("; ") + ".";
+          }
+          if (grp.passage) {
+            f.problem += " The linked passage “" + esc(grp.passage) + "” is in your uploads — read it to judge whether the popular answer is defensible.";
+          }
+          if (!qt.complete) {
+            f.problem += " <b>Only part of this question could be extracted</b> (the answer-choice text is missing), so check the original document.";
+          }
+        } else {
+          f.question = "Question " + q + " <span style=\"font-weight:400;font-size:13px;color:#6a776f;\">(no question text uploaded — flagged from the response data alone)</span>";
+          f.evidence = fileKeyConflict ? "Key conflict in files" : "Data only";
+        }
+
         f.options = combinedShares ? Object.keys(combinedShares).sort().map(function (L) {
           var state = null, pill = null;
           if (keyed === L) { state = "correct"; pill = "ANSWER KEY"; }
           if (most === L && most !== keyed) { state = "chose"; pill = "MOST CHOSE"; }
           if (most === L && most === keyed) { pill = "ANSWER KEY · MOST CHOSE"; }
-          return { letter: L, text: "Chosen by " + combinedShares[L] + "% of students", state: state, pill: pill };
+          var label = qt && qt.options[L]
+            ? "“" + esc(trunc(qt.options[L], 90)) + "” — chosen by " + combinedShares[L] + "%"
+            : "Chosen by " + combinedShares[L] + "% of students";
+          return { letter: L, text: label, state: state, pill: pill };
         }) : [];
         f.advanced = "Per-section percent missed: " + sections.map(function (s) {
           var v = aq.missedBySection[s.id];
@@ -315,10 +381,22 @@ window.ED = window.ED || {};
         text: watchCount + " question" + (watchCount === 1 ? "" : "s") + " had very high miss rates or big section gaps. The data can’t distinguish a broken question from a hard one — that judgment needs the exam text, so read those items before deciding anything."
       });
     }
-    takeaway.push({
-      lead: "What this analysis can’t see:",
-      text: "Exam Detective has not read the exam questions or passages, so it makes no claims about wording, defensible answers, or rewrites here. Flags are data signals from your uploaded results only."
-    });
+    if (ev) {
+      var linkedCount = ev.passages.filter(function (p) { return p.linked; }).length;
+      takeaway.push({
+        lead: "What the text evidence covers:",
+        text: "Question wording was extracted for " + ev.coverage.withText + " of " + totalQuestions + " questions" +
+          (ev.coverage.incomplete.length ? " (" + ev.coverage.incomplete.length + " partial — answer choices missing)" : "") +
+          (ev.passages.length ? ", plus " + ev.passages.length + " reading passage" + (ev.passages.length === 1 ? "" : "s") +
+            " (" + linkedCount + " linked to question ranges by explicit markers, " + (ev.passages.length - linkedCount) + " unmatched)" : "") +
+          ". Quoted text in the cards is verbatim from your files. The judgment calls — whether a popular answer is defensible, whether wording misleads — are still yours: the app quotes evidence, it doesn’t rule on it."
+      });
+    } else {
+      takeaway.push({
+        lead: "What this analysis can’t see:",
+        text: "Exam Detective has not read the exam questions or passages (none were uploaded), so it makes no claims about wording, defensible answers, or rewrites here. Flags are data signals from your uploaded results only. Upload the exam PDF in Step 3 to see question wording quoted alongside the flags."
+      });
+    }
 
     return {
       id: "uploaded-" + Date.now(),
@@ -336,16 +414,26 @@ window.ED = window.ED || {};
       combinedAverage: combinedAverage,
       combinedMedian: combinedMedian,
       sections: secSummaries,
-      groups: [group],
+      groups: groups,
       allQuestions: allQuestions,
       flagged: flagged,
       keyAudit: keyAudit,
       takeaway: takeaway,
-      openingSummary: "This review was built from your uploaded CSV results — " +
+      openingSummary: "This review was built from your uploaded results — " +
         sections.length + " class section" + (sections.length === 1 ? "" : "s") + ", " +
         totalResponses + " student" + (totalResponses === 1 ? "" : "s") + ", " + totalQuestions + " questions. " +
         "Flags below come from transparent data rules (decisive voting against the key, very high miss rates, large section gaps). " +
-        "Because the exam text itself wasn’t analyzed, every flag is a signal to review — not a finished judgment.",
+        (ev
+          ? "Question wording was extracted for " + ev.coverage.withText + " of " + totalQuestions + " questions from your uploaded exam file and is quoted verbatim in the cards below. Every flag is still a signal to review — the app quotes evidence, it doesn’t rule on it."
+          : "Because no exam text was uploaded, every flag is a signal to review — not a finished judgment."),
+      evidenceSummary: ev ? {
+        withText: ev.coverage.withText,
+        total: totalQuestions,
+        incomplete: ev.coverage.incomplete.length,
+        passages: ev.passages.map(function (p) {
+          return { title: p.title, file: p.file, linked: p.linked, from: p.from, to: p.to, how: p.how };
+        })
+      } : null,
       departmentPattern: {
         widespread: flagged.filter(function (f) { return f.classesAffected.length >= Math.max(sections.length, 1); }).map(function (f) { return f.number; }),
         sectionSpecific: flagged.filter(function (f) { return sections.length > 1 && f.classesAffected.length < sections.length; }).map(function (f) { return f.number; }),

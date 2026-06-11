@@ -1,6 +1,6 @@
 # Build Notes
 
-Last updated: 2026-06-11 (XLSX parsing + PDF answer-key extraction pass)
+Last updated: 2026-06-11 (exam-text & passage parsing + evidence labels pass)
 
 ## How to run it
 
@@ -34,6 +34,25 @@ needs to change.
 ## What has been built
 
 ### Real (not simulated)
+- **Exam-question & passage parsing** (`js/exam-parse.js`, wizard Step 3) —
+  text-based PDFs and .txt files are parsed for real: question stems and
+  answer choices extracted ("1. …" + "A. …" patterns), section markers like
+  "The Story (Questions 1–5)" detected, passage titles and word counts read.
+  Files are auto-classified exam-vs-passage with a manual override. Honest
+  limits everywhere: scanned PDFs refused (no OCR), custom encodings refused,
+  partial extractions labeled partial, missing wording never invented.
+- **Passage↔question linking — explicit evidence only.** A passage is linked
+  to a question range only when a "Questions X–Y" marker matches its title
+  (or appears inside the passage itself). Anything else is labeled
+  "Unmatched — needs review". No guessed links.
+- **Evidence in results** (`js/analysis-builder.js`) — flagged questions on
+  uploaded data now show their real extracted wording, answer-choice text
+  with vote shares, and an evidence-availability chip: Data only / Key
+  conflict in files / Question text available / Question + passage available
+  / Partial text — needs review. The "what to check" prose quotes the keyed
+  and most-chosen answers verbatim. Flag rules themselves stay data-driven —
+  the app quotes evidence, it doesn't rule on it. Results group by the
+  exam's own section markers when present.
 - **XLSX parsing** (`js/xlsx-parse.js`) — reads the ZIP container and sheet
   XML directly using the platform-native `DecompressionStream` (modern
   browsers + Node 18+; older browsers get an honest error). **No library
@@ -104,12 +123,19 @@ needs to change.
 ## Not yet connected / known issues
 
 - **Result PDFs** — accepted with an explicit "not yet parsed" label; never
-  analyzed. (PDF *answer keys* ARE parsed when the PDF is text-based.)
+  analyzed. (PDF *answer keys* and *exam/passage text* ARE parsed when the
+  PDF is text-based.)
 - **Scanned-PDF OCR** — not built; scans are detected and refused honestly.
-- **PDF exam-question / reading-passage extraction** — not built.
-- **XLSX fixtures are self-generated** (`scripts/make-fixtures.js` follows
-  the ECMA-376/ZIP spec), so a real Excel- or Google-Sheets-exported .xlsx
-  should be part of the first browser test.
+- **Exam-question extraction depends on conventional layouts** ("1." stems,
+  "A." choices, single-column). Real-world exam PDFs with tables, two-column
+  layouts, or images may extract partially — partial results are labeled,
+  but expect variation. Bug reports with a sample PDF are the way to harden it.
+- **No content judgment** — the app quotes extracted wording as evidence but
+  still doesn't judge whether an answer is defensible (that would need real
+  AI integration; nothing is faked meanwhile).
+- **Fixtures are self-generated** (`scripts/make-fixtures.js` follows the
+  ECMA-376/ZIP and PDF specs), so a real Excel-exported .xlsx and a real
+  word-processor exam PDF should be part of the first browser test.
 - **Exam-text analysis** — Step 3 files are recorded by name only. Uploaded
   data therefore gets no rewrites/"hard-but-fair" judgments, and the UI says so.
 - **Google login / cloud storage** — not wired (static site, no provider
@@ -127,9 +153,13 @@ needs to change.
 
 ## Next safest step
 
-Manual browser pass: upload `scripts/fixtures/student-rows.xlsx` through the
-wizard, then upload `scripts/fixtures/answer-key.pdf` in Step 4 — confirm the
-key fills with a review notice, and Results shows 1 section / 12 students /
-Q5 key-error flag. Also test one REAL Excel- or Sheets-exported .xlsx (the
-committed fixtures are self-generated). After that, the next build candidates
-are exam-text ingestion or Supabase cloud saving (AUTH_AND_STORAGE_PLAN.md).
+Manual browser pass of the full evidence flow: Step 2 →
+`scripts/fixtures/student-rows.xlsx`; Step 3 →
+`scripts/fixtures/exam-questions.pdf` + `passage.pdf` +
+`passage-unmatched.pdf` (expect: 5 questions extracted with Q5 partial,
+"The Story" linked to Q1–5, "A Different Tale" unmatched); Step 4 →
+`answer-key.pdf`; run. Results should quote real question wording on the
+flagged cards with evidence chips. Then repeat with a REAL word-processor
+exam PDF and a real Excel .xlsx — the committed fixtures are self-generated.
+After that, the next build candidates are Supabase cloud saving
+(AUTH_AND_STORAGE_PLAN.md) or saved-analyses management (search/duplicate).

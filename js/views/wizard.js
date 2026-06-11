@@ -102,6 +102,14 @@ ED.actions = ED.actions || {};
     return (s.key || []).filter(function (L) { return L; }).length;
   }
 
+  // Assembled question/passage evidence from parsed Step-3 files (or null).
+  function examEvidence(s) {
+    var parsed = (s.examFiles || []).filter(function (f) { return f.status === "parsed"; });
+    if (!parsed.length || !ED.examText) return null;
+    var asm = ED.examText.assemble(parsed);
+    return asm.coverage.withText || asm.passages.length ? asm : null;
+  }
+
   // Cross-file checks shown on the Review step — all computed from real data.
   function uploadedWarnings(s) {
     var warns = [];
@@ -155,6 +163,21 @@ ED.actions = ED.actions || {};
         warns.push({ level: "warn", title: "No student count for " + esc(sec.id), text: "This file didn’t say how many students responded. Results will show 0 students for this section unless the file includes a Responses/Students column." });
       }
     });
+
+    // exam-text cross-checks (question numbers must line up with results)
+    var evd = examEvidence(s);
+    if (evd) {
+      evd.warnings.forEach(function (w) {
+        warns.push({ level: "warn", title: "Exam text", text: esc(w) });
+      });
+      var examQs = Object.keys(evd.questions).map(Number);
+      var examMaxQ = examQs.length ? Math.max.apply(null, examQs) : 0;
+      if (maxQ && examMaxQ > maxQ) {
+        warns.push({ level: "warn", title: "Exam text goes past the results", text: "The exam file contains question numbers up to " + examMaxQ + ", but the results only go to " + maxQ + ". Check that the exam file and the result files are from the same exam." });
+      } else if (maxQ && evd.coverage.withText && evd.coverage.withText < maxQ) {
+        warns.push({ level: "warn", title: "Exam text covers part of the exam", text: "Question wording was extracted for " + evd.coverage.withText + " of " + maxQ + " questions in the results. The rest will show question numbers only — nothing is invented." });
+      }
+    }
 
     if (!warns.length) {
       warns.push({ level: "ok", title: "No problems detected", text: "Labels are unique, question counts line up, and everything needed to score is present." });
@@ -295,26 +318,47 @@ ED.actions = ED.actions || {};
     );
   }
 
+  function examFileRow(f, i) {
+    var statusHtml;
+    if (f.status === "error") {
+      statusHtml = '<span class="file-status err">✕ ' + esc(f.statusText) + '</span>';
+    } else if (f.kind === "exam") {
+      var ex = f.exam;
+      statusHtml = '<span class="file-status ok">✓ ' + ex.found + ' question' + (ex.found === 1 ? "" : "s") + ' extracted — ' +
+        ex.complete + ' complete' + (ex.incomplete.length ? ', ' + ex.incomplete.length + ' partial (answer choices missing)' : '') +
+        (ex.sections.length ? ' · ' + ex.sections.length + ' section marker' + (ex.sections.length === 1 ? "" : "s") + ' found' : '') + '</span>';
+    } else {
+      statusHtml = '<span class="file-status ok">✓ Passage “' + esc(f.passage.title) + '” — ' + f.passage.wordCount + ' words' +
+        (f.passage.titleSource === "first line" ? ' (title from the first line)' : ' (title from the file name)') + '</span>';
+    }
+    var kindSelect = f.status === "error" ? "" :
+      '<label class="small" for="w-examkind-' + i + '">Treat as:</label>' +
+      '<select id="w-examkind-' + i + '" data-change="wizard-exam-kind" data-index="' + i + '" aria-label="File type for ' + esc(f.name) + '">' +
+        '<option value="exam"' + (f.kind === "exam" ? " selected" : "") + '>Exam questions</option>' +
+        '<option value="passage"' + (f.kind === "passage" ? " selected" : "") + '>Reading passage</option>' +
+      '</select>';
+    return '<div class="file-row ' + (f.status === "error" ? "error" : "parsed") + '">' +
+      '<span class="file-name">' + esc(f.name) + '</span>' + kindSelect + statusHtml +
+      '<button class="btn btn-sm btn-danger" data-action="wizard-remove-file" data-list="examFiles" data-index="' + i + '">Remove</button>' +
+    '</div>';
+  }
+
   function step3(s) {
-    var rows = (s.examFiles || []).map(function (f, i) {
-      return '<div class="file-row unsupported">' +
-        '<span class="file-name">' + esc(f.name) + '</span>' +
-        '<span class="file-status warn">◌ Name recorded for reference — exam text isn’t read in this build</span>' +
-        '<button class="btn btn-sm btn-danger" data-action="wizard-remove-file" data-list="examFiles" data-index="' + i + '">Remove</button>' +
-      '</div>';
-    }).join("");
+    var rows = (s.examFiles || []).map(examFileRow).join("");
     return (
       modeBanner(s) +
       '<div class="card">' +
-        '<h2>Step 3 · Upload Exam Questions <span class="opt" style="font-size:12px;">optional</span></h2>' +
-        '<p class="mb-16">The exam, reading booklet, passages, or source texts.</p>' +
-        '<div class="notice warn"><span class="notice-title">Honest limitation</span>' +
-          'This build does <b>not</b> read exam text yet. Files you add here are listed with your analysis for reference only — they don’t change the results. When text analysis is built, this is where it will plug in.</div>' +
+        '<h2>Step 3 · Upload Exam Questions &amp; Passages <span class="opt" style="font-size:12px;">optional</span></h2>' +
+        '<p class="mb-16">The exam itself and its reading passages. <b>Text-based PDFs and .txt files are parsed for real:</b> question wording and answer choices are extracted and quoted as evidence next to flagged questions in the results. We auto-detect whether a file is exam questions or a passage — correct it below if we guessed wrong.</p>' +
+        '<div class="notice info"><span class="notice-title">Honest limits</span>' +
+          'Scanned PDFs can’t be read (no OCR yet) and custom-encoded PDFs are refused rather than guessed. Passages are linked to questions <b>only</b> when an explicit “Questions X–Y” marker matches — never by guessing. Missing wording is never invented; partly-extracted questions are labeled partial.</div>' +
         '<div class="upload-zone">' +
-          '<b>Choose exam files</b>' +
-          '<input type="file" multiple accept=".pdf,.docx,.txt" data-change="wizard-add-exam" aria-label="Upload exam questions and reading material">' +
+          '<b>Choose exam or passage files</b><span class="muted"> — PDF (text-based) or TXT</span>' +
+          '<input type="file" multiple accept=".pdf,.txt" data-change="wizard-add-exam" aria-label="Upload exam questions and reading material">' +
         '</div>' +
         '<div id="exam-file-list">' + rows + '</div>' +
+        ((s.examFiles || []).length || s.demoLoaded ? '' :
+          '<div class="empty-state"><b>No exam files yet.</b><span>This step is optional — but with the exam uploaded, flagged questions show their actual wording instead of just numbers.</span></div>') +
       '</div>' +
       navButtons(3)
     );
@@ -482,15 +526,39 @@ ED.actions = ED.actions || {};
           }).join("") +
         '</tbody></table></div>' +
 
+        examTextBlock(s) +
+
         '<h3 class="mt-24">Checks &amp; warnings</h3>' +
         uploadedWarnings(s).map(function (w) {
           return '<div class="notice ' + w.level + '"><span class="notice-title">' + w.title + '</span>' + w.text + '</div>';
         }).join("") +
 
-        '<p class="small muted mt-16">Need to change something? Re-upload or relabel files in Step 2, or edit the key in Step 4.</p>' +
+        '<p class="small muted mt-16">Need to change something? Re-upload or relabel files in Step 2, fix exam/passage files in Step 3, or edit the key in Step 4.</p>' +
       '</div>' +
       navButtons(5, "Looks right — continue")
     );
+  }
+
+  // Step-5 summary of what was read from exam/passage files.
+  function examTextBlock(s) {
+    var evd = examEvidence(s);
+    if (!evd) return "";
+    var html = '<h3 class="mt-24">Exam text detected</h3>';
+    html += '<p>Question wording extracted for <b>' + evd.coverage.withText + ' question' + (evd.coverage.withText === 1 ? "" : "s") + '</b>' +
+      (evd.coverage.incomplete.length ? ' (' + evd.coverage.incomplete.length + ' partial — answer choices missing)' : '') +
+      '. Extracted wording is quoted verbatim in the results; questions without wording show numbers only.</p>';
+    if (evd.passages.length) {
+      html += evd.passages.map(function (p) {
+        return '<div class="file-row ' + (p.linked ? "parsed" : "unsupported") + '">' +
+          '<span class="file-name">“' + esc(p.title) + '”</span>' +
+          '<span class="small muted">' + p.wordCount + ' words · ' + esc(p.file) + '</span>' +
+          (p.linked
+            ? '<span class="file-status ok">✓ Linked to Questions ' + p.from + '–' + p.to + ' — ' + esc(p.how) + '</span>'
+            : '<span class="file-status warn">◌ Unmatched — needs review. No “Questions X–Y” marker matched this passage; it won’t be attached to any question.</span>') +
+        '</div>';
+      }).join("");
+    }
+    return html;
   }
 
   function canRun(s) {
@@ -675,13 +743,80 @@ ED.actions = ED.actions || {};
     URL.revokeObjectURL(a.href);
   };
 
+  // Classify extracted text as exam questions or a passage. Stored raw
+  // text (capped) lets the user re-classify without re-uploading.
+  var RAW_TEXT_CAP = 200000;
+  function classifyExamText(text, fileName) {
+    var entry = { name: fileName, status: "parsed", rawText: String(text).slice(0, RAW_TEXT_CAP) };
+    var exam = ED.examText.parseExamText(entry.rawText);
+    if (exam.isExam) {
+      entry.kind = "exam";
+      entry.exam = exam;
+    } else {
+      entry.kind = "passage";
+      entry.passage = ED.examText.parsePassageText(entry.rawText, fileName.replace(/\.[^.]+$/, ""));
+    }
+    return entry;
+  }
+
   ED.actions["wizard-add-exam"] = function (el) {
-    var s = getState();
-    Array.prototype.forEach.call(el.files || [], function (f) {
-      s.examFiles.push({ name: f.name, kind: "reference only" });
-    });
-    setState(s); ED.app.rerender();
+    var files = Array.prototype.slice.call(el.files || []);
     el.value = "";
+    if (!files.length) return;
+    var s = getState();
+    var pending = files.length;
+    function done() { if (--pending === 0) { setState(s); ED.app.rerender(); } }
+
+    files.forEach(function (f) {
+      var ext = (f.name.split(".").pop() || "").toLowerCase();
+      if (ext === "pdf") {
+        var reader = new FileReader();
+        reader.onload = function () {
+          ED.pdf.extractText(reader.result).then(function (res) {
+            if (res.ok) s.examFiles.push(classifyExamText(res.text, f.name));
+            else s.examFiles.push({ name: f.name, status: "error", kind: "unreadable", statusText: res.error });
+            done();
+          });
+        };
+        reader.onerror = function () {
+          s.examFiles.push({ name: f.name, status: "error", kind: "unreadable", statusText: "The file couldn’t be read from disk. Try re-selecting it." });
+          done();
+        };
+        reader.readAsArrayBuffer(f);
+      } else if (ext === "txt") {
+        var tr = new FileReader();
+        tr.onload = function () { s.examFiles.push(classifyExamText(String(tr.result), f.name)); done(); };
+        tr.onerror = function () {
+          s.examFiles.push({ name: f.name, status: "error", kind: "unreadable", statusText: "The file couldn’t be read from disk. Try re-selecting it." });
+          done();
+        };
+        tr.readAsText(f);
+      } else {
+        s.examFiles.push({
+          name: f.name, status: "error", kind: "unreadable",
+          statusText: "Unsupported file type (." + ext + "). Use a text-based PDF or a .txt file — DOCX isn’t parsed yet."
+        });
+        done();
+      }
+    });
+  };
+
+  // Manual override: re-parse the stored text as the chosen kind.
+  ED.actions["wizard-exam-kind"] = function (el) {
+    var s = getState();
+    var i = parseInt(el.getAttribute("data-index"), 10);
+    var f = s.examFiles[i];
+    if (!f || f.status === "error" || !f.rawText) return;
+    if (el.value === "exam") {
+      f.kind = "exam";
+      f.exam = ED.examText.parseExamText(f.rawText);
+      f.passage = null;
+    } else {
+      f.kind = "passage";
+      f.passage = ED.examText.parsePassageText(f.rawText, f.name.replace(/\.[^.]+$/, ""));
+      f.exam = null;
+    }
+    setState(s); ED.app.rerender();
   };
 
   ED.actions["wizard-label"] = function (el) {
@@ -812,20 +947,25 @@ ED.actions = ED.actions || {};
     } else {
       var secs = parsedSections(s);
       var key = (s.key || []).slice(0, s.keyCount || s.key.length);
+      var evd = examEvidence(s);
       var analysis = ED.builder.build({
         setup: s.setup,
         sections: secs,
         key: key.some(function (L) { return L; }) ? key : null,
-        meta: uploadMeta(s)
+        meta: uploadMeta(s),
+        examEvidence: evd
       });
       ED.data.setActiveUploaded(analysis);
       var students = analysis.totalResponses;
       steps = [
         [25, "Scoring " + students + " student results across " + secs.length + " section" + (secs.length === 1 ? "" : "s") + "…"],
-        [55, "Checking " + analysis.totalQuestions + " questions against the key…"],
-        [85, "Applying flag rules (key conflicts, miss rates, section gaps)…"],
-        [100, "Done — " + analysis.flagged.length + " question" + (analysis.flagged.length === 1 ? "" : "s") + " flagged for review."]
+        [50, "Checking " + analysis.totalQuestions + " questions against the key…"],
+        [70, "Applying flag rules (key conflicts, miss rates, section gaps)…"]
       ];
+      if (evd) {
+        steps.push([90, "Attaching extracted wording for " + evd.coverage.withText + " question" + (evd.coverage.withText === 1 ? "" : "s") + " and " + evd.passages.length + " passage" + (evd.passages.length === 1 ? "" : "s") + "…"]);
+      }
+      steps.push([100, "Done — " + analysis.flagged.length + " question" + (analysis.flagged.length === 1 ? "" : "s") + " flagged for review."]);
     }
 
     var i = 0;

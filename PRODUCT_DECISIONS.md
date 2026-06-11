@@ -34,6 +34,19 @@ are refused (no OCR), custom-encoded PDFs are refused rather than guessed,
 and extracted keys always require review. Result PDFs remain unparsed and
 labeled. Rationale unchanged: one real path beats three fake ones.
 
+## Evidence is quoted, never judged (and never invented)
+
+Exam/passage text parsing (Step 3) exists to put real evidence in front of
+the teacher, not to automate the judgment. Flagged questions quote the
+extracted stem and answer choices verbatim and carry an evidence-availability
+chip (Data only / Key conflict in files / Question text available /
+Question + passage available / Partial text — needs review). The flag rules
+themselves remain pure data rules. Passages link to questions only via
+explicit "Questions X–Y" markers — fuzzy/guessed linking was rejected because
+a wrong link silently corrupts the teacher's review. Unmatched passages are
+labeled "needs review" instead. Partial extractions are labeled partial and
+missing wording is never filled in.
+
 ## Settings (and the wizard) start blank
 
 No pre-chosen subject/grade/format — placeholder text only, plus a

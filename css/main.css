@@ -327,6 +327,8 @@ table.data .qlink:hover { text-decoration: underline; }
 .wizard-step.current .n { background: var(--teal); color: #fff; }
 .wizard-step.done { color: var(--green); border-color: var(--green-border); }
 .wizard-step.done .n { background: var(--green); color: #fff; }
+.wizard-restart { margin-left: auto; border-style: dashed; color: var(--muted); }
+.wizard-restart:hover { color: var(--red); border-color: var(--red-border); }
 
 .field { margin-bottom: 16px; }
 .field label { display: block; font-weight: 700; font-size: 13.5px; margin-bottom: 5px; color: var(--navy); }

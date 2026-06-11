@@ -26,7 +26,7 @@ window.ED = window.ED || {};
   }
 
   // Score one section's letter-mode questions against the key.
-  // Mutates missedPct on each question entry; returns per-student scores.
+  // Mutates missedPct on each question entry.
   function scoreLettersAgainstKey(section, key) {
     Object.keys(section.questions).forEach(function (qs) {
       var q = parseInt(qs, 10);
@@ -34,14 +34,29 @@ window.ED = window.ED || {};
       if (qd.missedPct !== null) return; // already scored (correctness/aggregate)
       var keyed = key && key[q - 1];
       if (!keyed || !qd.distribution) return;
-      var total = 0, correct = 0;
+      var answered = 0, correct = 0;
       Object.keys(qd.distribution).forEach(function (L) {
-        total += qd.distribution[L];
+        answered += qd.distribution[L];
         if (L === keyed) correct += qd.distribution[L];
       });
-      total += qd.blankCount;
-      if (total) qd.missedPct = pctOf(total - correct, total);
+      if (!answered) {
+        // Nobody answered this question. That is NOT a 100% miss rate —
+        // it's missing data. Leave it unscored and say so (dataQuality).
+        qd.noResponses = true;
+        return;
+      }
+      // blanks among otherwise-answering students do count as missed
+      qd.missedPct = pctOf(answered + qd.blankCount - correct, answered + qd.blankCount);
     });
+  }
+
+  // Does this question have ANY recorded responses in this section?
+  function hasResponses(qd) {
+    if (!qd) return false;
+    if (qd.noResponses) return false;
+    var dist = qd.distribution || {};
+    var answered = Object.keys(dist).reduce(function (a, k) { return a + dist[k]; }, 0);
+    return !!(answered || qd.correctCount || qd.incorrectCount);
   }
 
   function distributionShares(qd, responses) {
@@ -101,10 +116,17 @@ window.ED = window.ED || {};
         avg = Math.round(s.studentScores.reduce(function (a, b) { return a + b; }, 0) / s.studentScores.length);
         med = median(s.studentScores);
       } else if (s.mode === "letters" && s.rows && key) {
+        // score only questions that actually have responses — a question
+        // nobody answered must not drag every student's average down
+        var scoreable = [];
+        for (var sq = 1; sq <= s.questionCount; sq++) {
+          var sqd = s.questions[sq];
+          if (!sqd || !sqd.noResponses) scoreable.push(sq);
+        }
         var scores = (s.rows || []).map(function (row) {
           var c = 0;
-          for (var q = 1; q <= s.questionCount; q++) if (row[q] && row[q] === key[q - 1]) c++;
-          return pctOf(c, s.questionCount);
+          scoreable.forEach(function (q) { if (row[q] && row[q] === key[q - 1]) c++; });
+          return pctOf(c, scoreable.length || 1);
         });
         avg = scores.length ? Math.round(scores.reduce(function (a, b) { return a + b; }, 0) / scores.length) : 0;
         med = median(scores);
@@ -174,6 +196,22 @@ window.ED = window.ED || {};
         unscored: !vals.length
       });
     }
+
+    // Questions that exist in the files but have no recorded responses
+    // anywhere — reported as missing data, never as "100% missed".
+    var noResponseQs = allQuestions.filter(function (aq) {
+      return aq.unscored && sections.some(function (s2) {
+        var qd = s2.questions[aq.number];
+        return qd && !hasResponses(qd);
+      });
+    }).map(function (aq) { return aq.number; });
+
+    // Evidence coverage counts only questions that exist in THIS result
+    // set — exam text for question numbers beyond the results is ignored.
+    var evInRange = ev ? Object.keys(ev.questions).map(Number).filter(function (n) {
+      return n >= 1 && n <= totalQuestions;
+    }).length : 0;
+    var evIncompleteInRange = ev ? ev.coverage.incomplete.filter(function (n) { return n <= totalQuestions; }).length : 0;
 
     // ---- flagging rules (transparent thresholds) ----
     var flagged = [];
@@ -385,8 +423,8 @@ window.ED = window.ED || {};
       var linkedCount = ev.passages.filter(function (p) { return p.linked; }).length;
       takeaway.push({
         lead: "What the text evidence covers:",
-        text: "Question wording was extracted for " + ev.coverage.withText + " of " + totalQuestions + " questions" +
-          (ev.coverage.incomplete.length ? " (" + ev.coverage.incomplete.length + " partial — answer choices missing)" : "") +
+        text: "Question wording was extracted for " + evInRange + " of " + totalQuestions + " questions" +
+          (evIncompleteInRange ? " (" + evIncompleteInRange + " partial — answer choices missing)" : "") +
           (ev.passages.length ? ", plus " + ev.passages.length + " reading passage" + (ev.passages.length === 1 ? "" : "s") +
             " (" + linkedCount + " linked to question ranges by explicit markers, " + (ev.passages.length - linkedCount) + " unmatched)" : "") +
           ". Quoted text in the cards is verbatim from your files. The judgment calls — whether a popular answer is defensible, whether wording misleads — are still yours: the app quotes evidence, it doesn’t rule on it."
@@ -399,7 +437,8 @@ window.ED = window.ED || {};
     }
 
     return {
-      id: "uploaded-" + Date.now(),
+      id: "uploaded-" + (meta.analysisId || Date.now()),
+      analysisId: meta.analysisId || null,
       source: "uploaded",
       uploadedMeta: meta,
       examName: setup.examName || "Uploaded exam",
@@ -424,12 +463,18 @@ window.ED = window.ED || {};
         totalResponses + " student" + (totalResponses === 1 ? "" : "s") + ", " + totalQuestions + " questions. " +
         "Flags below come from transparent data rules (decisive voting against the key, very high miss rates, large section gaps). " +
         (ev
-          ? "Question wording was extracted for " + ev.coverage.withText + " of " + totalQuestions + " questions from your uploaded exam file and is quoted verbatim in the cards below. Every flag is still a signal to review — the app quotes evidence, it doesn’t rule on it."
-          : "Because no exam text was uploaded, every flag is a signal to review — not a finished judgment."),
+          ? "Question wording was extracted for " + evInRange + " of " + totalQuestions + " questions from your uploaded exam file and is quoted verbatim in the cards below. Every flag is still a signal to review — the app quotes evidence, it doesn’t rule on it."
+          : "Because no exam text was uploaded, every flag is a signal to review — not a finished judgment.") +
+        (noResponseQs.length
+          ? " Note: question" + (noResponseQs.length === 1 ? "" : "s") + " " + noResponseQs.join(", ") +
+            " had no recorded student responses in the uploaded files — " + (noResponseQs.length === 1 ? "it was" : "they were") +
+            " excluded from scoring and flags, not counted as missed."
+          : ""),
+      dataQuality: { noResponses: noResponseQs },
       evidenceSummary: ev ? {
-        withText: ev.coverage.withText,
+        withText: evInRange,
         total: totalQuestions,
-        incomplete: ev.coverage.incomplete.length,
+        incomplete: evIncompleteInRange,
         passages: ev.passages.map(function (p) {
           return { title: p.title, file: p.file, linked: p.linked, from: p.from, to: p.to, how: p.how };
         })

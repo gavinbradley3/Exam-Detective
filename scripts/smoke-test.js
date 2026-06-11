@@ -197,6 +197,20 @@ console.log("— Saved analyses view with content —");
 ED.data.saveCurrent("Demo save");
 check("saved (with entry)", ED.views.saved(), ["Demo save", "Reopen", "Export backup"]);
 
+console.log("— New Analysis clean slate —");
+// at this point old wizard state (files, key, exam text) and an active
+// demo analysis both exist — bare New Analysis must offer the choice
+check("wizard chooser (leftover state)", ED.views.wizard(""), [
+  "Start fresh, or continue?", "Start a fresh analysis", "Continue the previous one"
+]);
+ED.actions["wizard-start-fresh"]();
+check("wizard blank after fresh start", ED.views.wizard(""), ["Analysis Setup", 'value=""'],
+  ["8B-results.csv", "exam.pdf", "story.txt", "Demo mode", "key.pdf"]);
+check("step 2 blank after fresh start", ED.views.wizard("2"), ["No result files yet"], ["8B-results.csv"]);
+check("step 3 blank after fresh start", ED.views.wizard("3"), ["No exam files yet"], ["exam.pdf", "scan.pdf"]);
+check("results closed after fresh start", ED.views.results(), ["no analysis has been run"], ["129", "Uploaded Data", "What is the tone"]);
+check("saved analyses survive fresh start", ED.views.saved(), ["Demo save"]);
+
 // ---- Data sanity checks (demo dataset) ----
 console.log("— Demo data sanity —");
 var an = ED.demo.analysis;

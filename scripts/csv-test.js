@@ -188,6 +188,79 @@ ok(imp.ok === true && ED.data.listSaved().length === 1, "JSON backup imports bac
 var badImp = ED.data.importBackup("{\"nope\":true}");
 ok(badImp.ok === false, "invalid backup file is rejected with a message");
 
+// ---------- 10. New Analysis must be a clean slate ----------
+console.log("New Analysis clean slate:");
+var s1 = ED.wizard.getState();
+var oldId = s1.analysisId;
+s1.setup = { examName: "Old Exam", subject: "ELA", grade: "8", sections: "", notes: "" };
+s1.resultFiles = [{ name: "old.csv", label: "8B", status: "parsed", format: "student rows", sections: res.sections }];
+s1.examFiles = [{
+  name: "old-exam.pdf", status: "parsed", kind: "exam", rawText: "9. OLD STALE Q9 TEXT\nA. old\nB. older",
+  exam: { isExam: true, questions: { 9: { stem: "OLD STALE Q9 TEXT", options: { A: "old", B: "older" }, complete: true } }, found: 1, complete: 1, incomplete: [], maxQ: 9, sections: [], warnings: [] }
+}];
+s1.key = ["A", "B"]; s1.keyCount = 2;
+s1.keyExtraction = { file: "old-key.pdf", found: 2, missing: [], conflicts: [] };
+ED.wizard.setState(s1);
+ED.data.setActiveUploaded(analysis); // old results still open
+
+ok(ED.wizard.hasProgress(ED.wizard.getState()) === true, "previous session counts as progress");
+var chooser = ED.views.wizard("");
+ok(chooser.indexOf("Start a fresh analysis") !== -1 && chooser.indexOf("Continue the previous one") !== -1,
+  "bare New Analysis shows the start-fresh choice — never silently reuses old files");
+ok(chooser.indexOf("exam/passage file") !== -1 && chooser.indexOf("Old Exam") !== -1, "chooser names what's left over");
+
+ED.actions["wizard-start-fresh"]();
+var s2 = ED.wizard.getState();
+ok(s2.resultFiles.length === 0 && s2.examFiles.length === 0, "fresh start clears uploaded files and parsed result data");
+ok(s2.keyCount === 0 && s2.key.length === 0 && !s2.keyExtraction, "fresh start clears the answer key and extraction notices");
+ok(!s2.demoLoaded && !s2.setup.examName && !s2.setup.notes, "fresh start clears demo state and setup");
+ok(!!s2.analysisId && s2.analysisId !== oldId, "fresh analysis gets a new unique analysis id");
+ok(ED.data.getActiveRecord() === null, "fresh start closes the previous results");
+var blankWizard = ED.views.wizard("");
+ok(blankWizard.indexOf("Analysis Setup") !== -1 && blankWizard.indexOf("old.csv") === -1 &&
+   blankWizard.indexOf("Old Exam") === -1 && blankWizard.indexOf("old-exam.pdf") === -1,
+  "wizard renders a true blank slate after reset");
+ok(ED.views.wizard("2").indexOf("old.csv") === -1 && ED.views.wizard("3").indexOf("old-exam.pdf") === -1 &&
+   ED.views.wizard("4").indexOf("old-key.pdf") === -1,
+  "steps 2–4 show no files, no extraction notices, no key from the previous analysis");
+ok(ED.views.results().indexOf("no analysis has been run") !== -1, "results page shows the honest empty state, not stale results");
+
+// ---------- 11. No stale evidence can attach to a new analysis ----------
+console.log("No stale evidence across analyses:");
+var ev1 = {
+  questions: { 9: { stem: "OLD STALE Q9 TEXT", options: { A: "old", B: "older" }, complete: true } },
+  sections: [], passages: [],
+  coverage: { withText: 1, complete: 1, incomplete: [] }, warnings: []
+};
+var anOne = ED.builder.build({ setup: { examName: "One" }, sections: res.sections, key: KEY, meta: { filesUploaded: 1, filesParsed: 1, unparsedFiles: [], analysisId: "an-one" }, examEvidence: ev1 });
+var q9a = anOne.flagged.filter(function (f) { return f.number === 9; })[0];
+ok(!!q9a && q9a.question.indexOf("OLD STALE Q9 TEXT") !== -1, "analysis #1 legitimately shows its own Q9 text");
+var anTwo = ED.builder.build({ setup: { examName: "Two" }, sections: res.sections, key: KEY, meta: { filesUploaded: 1, filesParsed: 1, unparsedFiles: [], analysisId: "an-two" }, examEvidence: null });
+var q9b = anTwo.flagged.filter(function (f) { return f.number === 9; })[0];
+ok(!!q9b && q9b.question.indexOf("OLD STALE") === -1, "analysis #2's Q9 carries no stale text from analysis #1");
+ok(q9b.question.indexOf("no question text uploaded") !== -1 && q9b.evidence === "Data only",
+  "Q9 without exam text says “Data only / no question text uploaded”");
+ok(anOne.analysisId === "an-one" && anTwo.analysisId === "an-two" && anOne.id !== anTwo.id,
+  "each analysis carries its own id");
+
+// ---------- 12. Questions with no usable answer data ----------
+console.log("Questions with no recorded responses:");
+var blankCsv = "Student,Section,Q1,Q2,Q3,Q4,Q5\n" +
+  "S1,8A,A,B,C,D,\nS2,8A,A,B,C,D,\nS3,8A,A,B,A,D,\nS4,8A,B,B,C,D,\n";
+var pb = ED.csv.parseResults(blankCsv, {});
+ok(pb.ok === true && pb.sections[0].responses === 4, "csv with an all-blank question column parses");
+var anBlank = ED.builder.build({ setup: { examName: "Blank Q" }, sections: pb.sections, key: ["A", "B", "C", "D", "A"], meta: { filesUploaded: 1, filesParsed: 1, unparsedFiles: [] } });
+ok(anBlank.dataQuality.noResponses.indexOf(5) !== -1, "Q5 reported as missing response data");
+ok(!anBlank.flagged.some(function (f) { return f.number === 5; }), "Q5 gets NO flags and no answer-choice suggestions");
+ok(anBlank.allQuestions[4].unscored === true, "Q5 is unscored — not treated as 100% missed");
+ok(anBlank.openingSummary.indexOf("no recorded student responses") !== -1, "opening summary explains the exclusion in plain language");
+ok(anBlank.sections[0].average === Math.round((100 + 100 + 75 + 75) / 4), "student averages exclude the blank question from the denominator");
+var sBlank = ED.wizard.getState();
+sBlank.setup = { examName: "Blank Q", subject: "ELA", grade: "8", sections: "", notes: "" };
+sBlank.resultFiles = [{ name: "blank.csv", label: "8A", status: "parsed", format: "student rows", sections: pb.sections }];
+ED.wizard.setState(sBlank);
+ok(ED.views.wizard("5").indexOf("No responses for some questions") !== -1, "review step warns about blank questions before the run");
+
 // ---------- result ----------
 if (failures.length) {
   console.error("\nFAILURES:");

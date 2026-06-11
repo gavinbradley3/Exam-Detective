@@ -36,14 +36,22 @@ ED.actions = ED.actions || {};
     return key;
   }
 
+  // Every analysis gets its own id — parsed data, evidence, and results
+  // are tied to it so nothing from a previous analysis can leak forward.
+  function newAnalysisId() {
+    return "an-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+  }
+
   function defaultState() {
     return {
+      analysisId: newAnalysisId(),
       setup: { examName: "", subject: "", grade: "", sections: "", notes: "" },
       resultFiles: [],   // {name, label, status: parsed|unsupported|error, statusText, sections, format}
       examFiles: [],
       keySource: "",
       key: [],
       keyCount: 0,
+      keyExtraction: null,
       demoLoaded: false
     };
   }
@@ -54,6 +62,7 @@ ED.actions = ED.actions || {};
       var s = raw ? JSON.parse(raw) : defaultState();
       // older saved states may miss newer fields
       if (s.keyCount === undefined) s.keyCount = (s.key || []).length;
+      if (!s.analysisId) s.analysisId = newAnalysisId();
       return s;
     } catch (e) {
       return defaultState();
@@ -68,7 +77,29 @@ ED.actions = ED.actions || {};
     try { localStorage.removeItem(STORE_KEY); } catch (e) {}
   }
 
-  ED.wizard = { getState: getState, setState: setState, resetState: resetState, demoKey: demoKey, MAX_Q: MAX_Q };
+  // Anything the user has put into the wizard counts as progress.
+  function hasProgress(s) {
+    var st = s.setup || {};
+    return !!(s.demoLoaded || (s.resultFiles || []).length || (s.examFiles || []).length ||
+      (s.keyCount || 0) > 0 || st.examName || st.subject || st.grade || st.sections || st.notes);
+  }
+
+  // The clean slate: wipes the wizard (files, parsed data, exam text,
+  // key, extraction notices, demo mode) AND the active results, then
+  // issues a fresh analysis id. Saved analyses are untouched.
+  function startFresh() {
+    resetState();
+    if (ED.data) ED.data.clearActive();
+    var s = defaultState();
+    setState(s);
+    return s;
+  }
+
+  ED.wizard = {
+    getState: getState, setState: setState, resetState: resetState,
+    startFresh: startFresh, hasProgress: hasProgress,
+    demoKey: demoKey, MAX_Q: MAX_Q
+  };
 
   var esc = function (s) { return ED.analysis.esc(s); };
 
@@ -164,6 +195,26 @@ ED.actions = ED.actions || {};
       }
     });
 
+    // questions present in a file but with zero recorded answers
+    secs.forEach(function (sec) {
+      var blankQs = [];
+      for (var q = 1; q <= (sec.questionCount || 0); q++) {
+        var qd = sec.questions && sec.questions[q];
+        if (!qd) continue;
+        var dist = qd.distribution || {};
+        var answered = Object.keys(dist).reduce(function (a, k) { return a + dist[k]; }, 0);
+        if (!answered && !qd.correctCount && !qd.incorrectCount && (qd.blankCount || 0) > 0) blankQs.push(q);
+      }
+      if (blankQs.length) {
+        warns.push({
+          level: "warn", title: "No responses for some questions in " + esc(sec.id),
+          text: "Question" + (blankQs.length === 1 ? "" : "s") + " " + blankQs.join(", ") +
+            " " + (blankQs.length === 1 ? "has" : "have") + " no recorded answers (every cell is blank). " +
+            (blankQs.length === 1 ? "It" : "They") + " will be excluded from scoring — not treated as 100% missed."
+        });
+      }
+    });
+
     // exam-text cross-checks (question numbers must line up with results)
     var evd = examEvidence(s);
     if (evd) {
@@ -195,7 +246,9 @@ ED.actions = ED.actions || {};
         return '<a role="listitem" class="wizard-step ' + cls + '" href="#/new-analysis/' + n + '"' +
           (n === current ? ' aria-current="step"' : '') + '>' +
           '<span class="n" aria-hidden="true">' + (n < current ? "✓" : n) + '</span><span class="wizard-step-label">' + label + '</span></a>';
-      }).join("") + '</div>';
+      }).join("") +
+      '<a class="wizard-step wizard-restart" href="#/new-analysis" title="Clear everything and start a clean analysis">Start over</a>' +
+      '</div>';
   }
 
   function navButtons(current, nextLabel, nextAction) {
@@ -600,7 +653,51 @@ ED.actions = ED.actions || {};
 
   // ---------- view entry point ----------
 
+  // Shown when "New Analysis" is opened while previous work exists:
+  // the user explicitly chooses a clean slate or continuing. Nothing
+  // carries over silently.
+  function chooserView(s, activeRec) {
+    var bits = [];
+    if (s.demoLoaded) bits.push("demo files loaded");
+    if ((s.resultFiles || []).length) bits.push((s.resultFiles || []).length + " result file" + (s.resultFiles.length === 1 ? "" : "s"));
+    if ((s.examFiles || []).length) bits.push((s.examFiles || []).length + " exam/passage file" + (s.examFiles.length === 1 ? "" : "s"));
+    if ((s.keyCount || 0) > 0) bits.push("an answer key (" + s.keyCount + " questions)");
+    if (s.setup && s.setup.examName) bits.unshift("“" + esc(s.setup.examName) + "”");
+    var what = bits.length ? bits.join(", ") : "an earlier session";
+    var activeNote = activeRec
+      ? '<p class="small muted mt-8">There’s also a finished analysis open on the Results page (' +
+        (activeRec.source === "demo" ? "demo data" : "uploaded data") + '). Starting fresh closes it too. ' +
+        'Want to keep it? <a href="#/saved">Save it first</a>.</p>'
+      : "";
+    return (
+      '<div class="page"><div class="container narrow">' +
+        '<div class="page-head">' +
+          '<div class="eyebrow">New Analysis</div>' +
+          '<h1>Start fresh, or continue?</h1>' +
+        '</div>' +
+        '<div class="card">' +
+          '<p>You still have ' + what + ' from before. A new analysis starts with a completely clean slate — ' +
+          '<b>all previous files, parsed data, extracted exam text, and the answer key are cleared</b> so nothing old can leak into new results.</p>' +
+          activeNote +
+          '<div class="btn-row mt-24">' +
+            '<button class="btn btn-primary" data-action="wizard-start-fresh">Start a fresh analysis</button>' +
+            '<a class="btn btn-outline" href="#/new-analysis/1">Continue the previous one</a>' +
+          '</div>' +
+        '</div>' +
+      '</div></div>'
+    );
+  }
+
   ED.views.wizard = function (stepParam) {
+    if (!stepParam) {
+      // Bare "New Analysis" (nav button, dashboard buttons): offer the
+      // explicit choice whenever anything old exists; otherwise open a
+      // clean step 1 directly.
+      var s0 = getState();
+      var activeRec = ED.data ? ED.data.getActiveRecord() : null;
+      if (hasProgress(s0) || activeRec) return chooserView(s0, activeRec);
+      stepParam = "1";
+    }
     var step = Math.min(Math.max(parseInt(stepParam, 10) || 1, 1), 7);
     if (step === 7) { location.hash = "#/results"; return ""; }
     var s = getState();
@@ -615,6 +712,12 @@ ED.actions = ED.actions || {};
         bodies[step - 1](s, ED.wizard._setupErrors) +
       '</div></div>'
     );
+  };
+
+  ED.actions["wizard-start-fresh"] = function () {
+    startFresh();
+    if ((location.hash || "") === "#/new-analysis/1") ED.app.rerender();
+    else location.hash = "#/new-analysis/1";
   };
 
   // ---------- actions ----------
@@ -948,11 +1051,13 @@ ED.actions = ED.actions || {};
       var secs = parsedSections(s);
       var key = (s.key || []).slice(0, s.keyCount || s.key.length);
       var evd = examEvidence(s);
+      var meta = uploadMeta(s);
+      meta.analysisId = s.analysisId; // ties the results to this wizard session
       var analysis = ED.builder.build({
         setup: s.setup,
         sections: secs,
         key: key.some(function (L) { return L; }) ? key : null,
-        meta: uploadMeta(s),
+        meta: meta,
         examEvidence: evd
       });
       ED.data.setActiveUploaded(analysis);

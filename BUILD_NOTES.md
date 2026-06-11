@@ -1,6 +1,25 @@
 # Build Notes
 
-Last updated: 2026-06-11 (exam-text & passage parsing + evidence labels pass)
+Last updated: 2026-06-11 (data-integrity fix: clean-slate New Analysis)
+
+## Data-integrity model (read this before touching state code)
+
+- Wizard state lives under `examdetective.wizard` and carries an
+  `analysisId`. **Bare `#/new-analysis`** (the nav/dashboard buttons) shows a
+  start-fresh-or-continue choice whenever ANY previous state or open results
+  exist; "Start fresh" (`ED.wizard.startFresh()`) wipes the wizard (files,
+  parsed sections, exam text, passages, key, extraction notices, demo flag),
+  closes the active results, and issues a new analysisId. A dashed
+  "Start over" link in the wizard step bar reaches the same choice.
+- localStorage audit: `examdetective.wizard` + `examdetective.active` are
+  per-analysis (cleared by fresh start); `examdetective.saved` changes only
+  via explicit Save/Reopen/Delete/Import; `examdetective.settings` and
+  `examdetective.profile` are deliberate cross-analysis user preferences.
+  Saved analyses load ONLY via the Saved page's Reopen button.
+- A question with zero recorded responses is **excluded from scoring**
+  (`dataQuality.noResponses`), never shown as "100% missed", gets no flags
+  or answer-choice analysis, is left out of student-average denominators,
+  and is called out on the Review step and in the opening summary.
 
 ## How to run it
 

@@ -1,6 +1,6 @@
 # Build Notes
 
-Last updated: 2026-06-11 (data-integrity fix: clean-slate New Analysis)
+Last updated: 2026-06-12 (report quality, AI layer, server boundary, saved-analysis management, exports, PDF hardening — see BACKLOG.md for the phase plan)
 
 ## Data-integrity model (read this before touching state code)
 
@@ -26,29 +26,24 @@ Last updated: 2026-06-11 (data-integrity fix: clean-slate New Analysis)
 No installation, no build step.
 
 **Easiest:** double-click `index.html` — everything works except the
-"Download HTML" report button (browsers block fetching files from disk;
-use Print → Save as PDF instead).
+"Download HTML" button and AI feedback.
 
-**Best:** serve it locally so everything works:
-
-```
-cd Exam-Detective
-python3 -m http.server 8000
-```
-
-then open http://localhost:8000.
+**Best:** `node server.js` then http://localhost:8000 — everything works;
+add `ANTHROPIC_API_KEY=...` to enable AI-assisted feedback (AI_SETUP.md).
+`python3 -m http.server 8000` also serves the app (no AI endpoint).
 
 **Tests:**
 
 ```
-node scripts/smoke-test.js     # renders every page, demo + uploaded + empty states
-node scripts/csv-test.js       # CSV parser + data-honesty tests (53 checks)
-node scripts/xlsx-pdf-test.js  # XLSX + PDF-key parsing tests (40 checks)
+node scripts/csv-test.js       # parsing, data honesty, state integrity, categories (107)
+node scripts/xlsx-pdf-test.js  # XLSX/PDF parsing + exam-text evidence (74)
+node scripts/smoke-test.js     # every page in empty/demo/uploaded states
+node scripts/ai-test.js        # AI feedback layer + server boundary, fully mocked (41)
 ```
 
-Run all three after any change to `js/`. Binary fixtures are committed;
-regenerate them with `node scripts/make-fixtures.js` only if their content
-needs to change.
+Run all four after any change to `js/` or `server.js`. Binary fixtures are
+committed; regenerate with `node scripts/make-fixtures.js` only if their
+content needs to change. Browser releases: MANUAL_TEST_CHECKLIST.md.
 
 ## What has been built
 

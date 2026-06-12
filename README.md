@@ -14,13 +14,16 @@ It is **not** a gradebook or a student tracker. It reviews questions, not studen
 No installation or build step needed.
 
 - **Quick look:** open `index.html` in your browser.
-- **Full experience** (enables the HTML report download):
+- **Full experience** (HTML report download + optional AI feedback):
 
   ```
-  python3 -m http.server 8000
+  node server.js
   ```
 
-  then visit http://localhost:8000
+  then visit http://localhost:8000. (`python3 -m http.server 8000` also
+  works, minus the AI endpoint.) To enable AI-assisted feedback:
+  `ANTHROPIC_API_KEY=sk-... node server.js` — the key stays on the server,
+  never in frontend code. Details: `AI_SETUP.md`.
 
 The app ships with a realistic demo (five Grade 8 ELA sections, 75 questions,
 three suspected key errors). Click **View Demo** on the landing page, or go
@@ -38,12 +41,13 @@ parsed". Every results page and export is labeled **Demo Data** or
 ## Test it
 
 ```
-node scripts/smoke-test.js     # renders every page (empty, demo, uploaded states)
-node scripts/csv-test.js       # CSV parser + data-honesty tests
-node scripts/xlsx-pdf-test.js  # XLSX + PDF answer-key parsing tests
+node scripts/csv-test.js       # parsing, data honesty, state integrity, categories
+node scripts/xlsx-pdf-test.js  # XLSX/PDF parsing + exam-text evidence
+node scripts/smoke-test.js     # every page in empty/demo/uploaded states
+node scripts/ai-test.js        # AI feedback layer + server boundary (mocked)
 ```
 
-Run all three after changing anything in `js/`.
+Run all four after changing anything in `js/` or `server.js`.
 
 ## Where things live
 
@@ -61,7 +65,12 @@ Run all three after changing anything in `js/`.
 | `js/analysis.js` | Flag definitions, priority order, helpers |
 | `js/report-blocks.js` | Shared report renderers (question cards, takeaway, …) |
 | `js/views/` | One file per page |
+| `js/ai-feedback.js` | Optional AI layer: evidence packets, strict contract, gated rendering |
+| `js/cloud.js` | Honest cloud-sync status (Supabase not wired yet) |
+| `server.js` | Static hosting + the AI API boundary (key via env only) |
 | `js/app.js` | Hash router + event wiring |
+| `MANUAL_TEST_CHECKLIST.md` | Browser test script for releases |
+| `AI_SETUP.md` | AI feedback setup, privacy, cost, failure behavior |
 | `scripts/` | Test suites + CSV fixtures |
 | `BUILD_NOTES.md` | What's built, what's verified, what's next |
 | `PRODUCT_DECISIONS.md` | Why things are the way they are |

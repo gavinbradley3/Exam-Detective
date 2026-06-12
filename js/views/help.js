@@ -24,6 +24,10 @@ ED.views.help = function () {
       body: "<p>“Save analysis” on the Results page stores the analysis in <b>this browser’s local storage</b> — on this device, not in the cloud. Reopen saves from the Saved page, and export a JSON backup there if the work matters (clearing browser data deletes local saves). Real sign-in with cloud storage is planned; the Sign in page explains honestly what works today.</p>"
     },
     {
+      id: "ai", title: "AI-assisted feedback (optional)",
+      body: "<p>On uploaded results, each flagged card offers optional AI feedback. The AI <b>never decides what gets flagged</b> — the transparent data rules do that — and it only sees that one question’s numbers plus whatever wording was genuinely extracted from your uploads. Nothing is sent until you confirm a privacy/cost notice, suggestions are advisory, and rewrite suggestions only appear when the full question text was extracted. It requires the app to run through <code>server.js</code> with an API key configured (see AI_SETUP.md); without that, the button says so honestly and everything else works normally.</p>"
+    },
+    {
       id: "labels", title: "What the labels mean",
       body: "<ul style='padding-left:18px;'>" + ED.analysis.FLAGS.map(function (f) {
         return "<li style='margin-bottom:10px;'>" + ED.blocks.flagBadge(f.label) + "<br><span class='small'>" + f.meaning + "</span></li>";

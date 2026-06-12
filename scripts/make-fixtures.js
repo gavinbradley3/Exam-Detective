@@ -293,6 +293,26 @@ var unmatchedLines = [
 ];
 fs.writeFileSync(path.join(outDir, "passage-unmatched.pdf"), makePdf(textContent(unmatchedLines)));
 
+// 11b. "Hardened" exam PDF: running headers, page numbers, inline answer
+//      choices, and options split across lines — real-world layout noise.
+var hardenedLines = [
+  "Grade 8 ELA Final - Form B",
+  "Page 1 of 2",
+  "The River (Questions 1-3)",
+  "1. Where does the story open? A. The dock B. The school",
+  "C. The barn",
+  "D. The bridge",
+  "Grade 8 ELA Final - Form B",
+  "2. The word \"current\" in line 4 means -",
+  "A. a flow of water B. recent C. electricity D. a gift",
+  "Page 2 of 2",
+  "Grade 8 ELA Final - Form B",
+  "3. Why does Mara return to the dock?",
+  "A. She forgot the rope",
+  "B. She hears the dog barking"
+];
+fs.writeFileSync(path.join(outDir, "exam-hardened.pdf"), makePdf(textContent(hardenedLines)));
+
 // 11. Custom-encoded PDF: text operators whose bytes aren't readable text
 //     (simulates subset fonts with custom CMaps -> must be refused)
 var junk = "";
@@ -302,6 +322,6 @@ fs.writeFileSync(path.join(outDir, "encoded.pdf"), makePdf("BT\n/F1 12 Tf\n72 72
 console.log("Fixtures written to scripts/fixtures/:");
 ["student-rows.xlsx", "question-rows.xlsx", "multi-sheet.xlsx", "answer-key.xlsx",
  "answer-key.pdf", "answer-key-partial.pdf", "scanned.pdf",
- "exam-questions.pdf", "passage.pdf", "passage-unmatched.pdf", "encoded.pdf"].forEach(function (f) {
+ "exam-questions.pdf", "exam-hardened.pdf", "passage.pdf", "passage-unmatched.pdf", "encoded.pdf"].forEach(function (f) {
   console.log("  " + f + " (" + fs.statSync(path.join(outDir, f)).size + " bytes)");
 });

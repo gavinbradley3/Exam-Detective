@@ -174,6 +174,20 @@ async function main() {
   var examEnc = await ED.examText.parseExamPDF(fixture("encoded.pdf"));
   ok(examEnc.ok === false && examEnc.kind === "encoded", "custom-encoded PDF refused instead of producing garbage");
 
+  // ---------- 11b. Layout hardening: headers, page numbers, inline options ----------
+  console.log("Hardened exam PDF (layout noise):");
+  var hard = await ED.examText.parseExamPDF(fixture("exam-hardened.pdf"));
+  ok(hard.ok === true && hard.found === 3 && hard.complete === 3, "all 3 questions extracted despite layout noise");
+  ok(hard.questions[1].stem === "Where does the story open?", "inline 'stem + options' line split correctly");
+  ok(hard.questions[1].options.A === "The dock" && hard.questions[1].options.D === "The bridge",
+    "inline options + options on later lines all captured (4 choices)");
+  ok(hard.questions[2].options.B === "recent" && hard.questions[2].options.D === "a gift",
+    "four options on a single line split correctly");
+  var allHardText = JSON.stringify(hard.questions);
+  ok(allHardText.indexOf("Form B") === -1 && allHardText.indexOf("Page 1") === -1,
+    "running headers and page numbers never leak into question text");
+  ok(hard.sections.length === 1 && hard.sections[0].title === "The River", "section marker survives the cleanup");
+
   // ---------- 12. Passage PDF parsing + explicit-evidence linking ----------
   console.log("Passage PDFs & linking:");
   var passage = await ED.examText.parsePassagePDF(fixture("passage.pdf"), "passage");

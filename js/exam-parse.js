@@ -36,12 +36,51 @@ window.ED = window.ED || {};
     return s.length > n ? s.slice(0, n - 1).trim() + "…" : s;
   }
 
+  // ---------- layout hardening (real-world PDF noise) ----------
+  // Removes page furniture and untangles common layout quirks. It only
+  // ever DROPS noise or SPLITS lines — it never invents or merges content,
+  // so the worst case is still honest partial extraction.
+  function preprocessLines(lines) {
+    // 1) obvious page furniture
+    lines = lines.filter(function (l) {
+      if (/^page\s+\d+(\s+of\s+\d+)?$/i.test(l)) return false;  // "Page 3 of 12"
+      if (/^-\s*\d+\s*-$/.test(l)) return false;                // "- 7 -"
+      if (/^\d{1,3}$/.test(l)) return false;                    // bare page number
+      return true;
+    });
+    // 2) repeated running headers/footers: the same short line 3+ times
+    //    that is neither a question, an option, nor a section marker
+    var counts = {};
+    lines.forEach(function (l) { if (l && l.length <= 70) counts[l] = (counts[l] || 0) + 1; });
+    lines = lines.filter(function (l) {
+      return !(counts[l] >= 3 && !STEM_RE.test(l) && !OPTION_RE.test(l) && !RANGE_RE.test(l));
+    });
+    // 3) inline answer choices: "1. Stem? A. x B. y" or "A. x B. y C. z"
+    //    on one line. Split only when the pieces genuinely look like
+    //    options — a sentence that merely contains "B. " stays intact.
+    var out = [];
+    lines.forEach(function (l) {
+      var parts = l.split(/\s+(?=[A-E][.)]\s)/);
+      if (parts.length >= 2) {
+        var optionish = parts.filter(function (p) { return OPTION_RE.test(p); }).length;
+        if (optionish >= 2 || (optionish >= 1 && STEM_RE.test(parts[0]))) {
+          out.push.apply(out, parts);
+          return;
+        }
+      }
+      out.push(l);
+    });
+    return out;
+  }
+
   // ---------- exam text -> questions + section markers ----------
 
   // -> { isExam, questions: {n:{stem, options, complete}}, found,
   //      complete, incomplete:[n], maxQ, sections:[{title, from, to}], warnings }
   function parseExamText(text) {
-    var lines = String(text || "").split(/\n/).map(function (l) { return l.replace(/\s+/g, " ").trim(); });
+    var lines = preprocessLines(
+      String(text || "").split(/\n/).map(function (l) { return l.replace(/\s+/g, " ").trim(); })
+    );
     var questions = {};
     var sections = [];
     var current = null;     // {n, stem, options, lastOption}

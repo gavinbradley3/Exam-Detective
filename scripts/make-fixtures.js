@@ -293,6 +293,41 @@ var unmatchedLines = [
 ];
 fs.writeFileSync(path.join(outDir, "passage-unmatched.pdf"), makePdf(textContent(unmatchedLines)));
 
+// 11a. Class-results item-analysis PDF (the "8E 2026.pdf" shape):
+//      header noise, student count, question + % correct + keyed letter rows.
+var resultsReportLines = [
+  "8C 2026 - Item Analysis Report",
+  "Grade 8 ELA Final Exam",
+  "Class: 8C    Students: 26",
+  "Question   % Correct   Key",
+  "1   82%   B",
+  "2   74%   A",
+  "3   39%   C",
+  "4   91%   D",
+  "5   18%   A",
+  "6   66%   B",
+  "7   58%   C",
+  "8   85%   D",
+  "Page 1 of 1"
+];
+fs.writeFileSync(path.join(outDir, "results-report.pdf"), makePdf(textContent(resultsReportLines)));
+
+// 11c. Table-style answer key PDF: header words, cells on separate lines
+//      (1 / B / 2 / D ...), a compact multi-column row, and a lowercase letter.
+var keyTableLines = [
+  "Grade 8 ELA - Answer Key",
+  "Question", "Answer",
+  "1", "B",
+  "2", "D",
+  "3", "A",
+  "4", "C",
+  "5", "b",
+  "6", "A",
+  "7 C   8 D   9 A",
+  "10", "B"
+];
+fs.writeFileSync(path.join(outDir, "answer-key-table.pdf"), makePdf(textContent(keyTableLines)));
+
 // 11b. "Hardened" exam PDF: running headers, page numbers, inline answer
 //      choices, and options split across lines — real-world layout noise.
 var hardenedLines = [
@@ -321,7 +356,8 @@ fs.writeFileSync(path.join(outDir, "encoded.pdf"), makePdf("BT\n/F1 12 Tf\n72 72
 
 console.log("Fixtures written to scripts/fixtures/:");
 ["student-rows.xlsx", "question-rows.xlsx", "multi-sheet.xlsx", "answer-key.xlsx",
- "answer-key.pdf", "answer-key-partial.pdf", "scanned.pdf",
+ "answer-key.pdf", "answer-key-partial.pdf", "answer-key-table.pdf", "scanned.pdf",
+ "results-report.pdf",
  "exam-questions.pdf", "exam-hardened.pdf", "passage.pdf", "passage-unmatched.pdf", "encoded.pdf"].forEach(function (f) {
   console.log("  " + f + " (" + fs.statSync(path.join(outDir, f)).size + " bytes)");
 });

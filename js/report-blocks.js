@@ -303,6 +303,19 @@ window.ED = window.ED || {};
   function keyAuditSection(an) {
     var ka = an.keyAudit;
     var html = '<div class="rhead" id="key-audit">Key Audit Summary</div>';
+    // Provenance: every uploaded-data report states which key it used.
+    var kp = an.keyProvenance;
+    if (kp) {
+      var countNote = kp.entries === an.totalQuestions
+        ? " — matches the " + an.totalQuestions + " questions in the results."
+        : " — <b>count mismatch:</b> the key has " + kp.entries + " answer" + (kp.entries === 1 ? "" : "s") + " but the student results contain " + an.totalQuestions + " questions.";
+      html += '<p class="rhead-sub"><b>Answer key used:</b> ' +
+        (kp.file ? A().esc(kp.file) + " (" + A().esc(kp.source) + ")" : A().esc(kp.source)) +
+        " · " + kp.entries + " answer" + (kp.entries === 1 ? "" : "s") + " extracted" + countNote +
+        ((kp.missing || []).length ? " Missing entries: Q" + kp.missing.slice(0, 12).join(", Q") + (kp.missing.length > 12 ? "…" : "") + "." : "") +
+        ((kp.conflicts || []).length ? " <b>Conflicting entries</b> (most frequent letter kept): Q" + kp.conflicts.join(", Q") + "." : "") +
+        '</p>';
+    }
     if (!ka.findings.length) {
       return html + '<p class="rhead-sub">No key inconsistencies were detected across the uploaded files.</p>';
     }

@@ -1,6 +1,6 @@
 # Build Notes
 
-Last updated: 2026-06-12 (report quality, AI layer, server boundary, saved-analysis management, exports, PDF hardening — see BACKLOG.md for the phase plan)
+Last updated: 2026-06-12 (upload-pipeline repair: result-PDF parsing, key-PDF formats/validation/provenance, key gate, per-file errors)
 
 ## Data-integrity model (read this before touching state code)
 
@@ -35,8 +35,8 @@ add `ANTHROPIC_API_KEY=...` to enable AI-assisted feedback (AI_SETUP.md).
 **Tests:**
 
 ```
-node scripts/csv-test.js       # parsing, data honesty, state integrity, categories (107)
-node scripts/xlsx-pdf-test.js  # XLSX/PDF parsing + exam-text evidence (74)
+node scripts/csv-test.js       # parsing, data honesty, state integrity, categories (118)
+node scripts/xlsx-pdf-test.js  # XLSX/PDF parsing + exam-text evidence (109)
 node scripts/smoke-test.js     # every page in empty/demo/uploaded states
 node scripts/ai-test.js        # AI feedback layer + server boundary, fully mocked (41)
 ```
@@ -80,8 +80,10 @@ content needs to change. Browser releases: MANUAL_TEST_CHECKLIST.md.
   found/missing/conflicting entries and always demands review. **Scanned
   (image-only) PDFs are detected and refused** with an explicit "no OCR"
   message; custom-font-encoded PDFs are detected (low printable ratio) and
-  refused rather than producing garbage. Result PDFs (not keys) remain
-  unparsed and labeled as such.
+  refused rather than producing garbage. Key formats: numbered lists,
+  table cells on separate lines, compact multi-column rows, lowercase
+  letters, keys split across pages. Wrong-document uploads are detected
+  and cross-routed.
 - **Key file upload** (wizard Step 4) — CSV/XLSX (Question + Key columns)
   or text-based PDF; extraction fills the grid, never silently — a review
   notice lists entry count, missing questions (left blank, not guessed),
@@ -136,9 +138,14 @@ content needs to change. Browser releases: MANUAL_TEST_CHECKLIST.md.
 
 ## Not yet connected / known issues
 
-- **Result PDFs** — accepted with an explicit "not yet parsed" label; never
-  analyzed. (PDF *answer keys* and *exam/passage text* ARE parsed when the
-  PDF is text-based.)
+- **Result PDFs are parsed** (text-based item-analysis tables: question +
+  percent rows, "Students: N", optional Key column → aggregate sections).
+  Chart/image layouts, scans, and custom encodings get specific refusals.
+  Wrong-document uploads are cross-routed ("this looks like an answer key —
+  Step 4"). Analysis never runs without an answer key (typed, pasted,
+  extracted, or embedded in the result files) — no guessing, no reuse
+  across analyses — and every uploaded-data report states which key was
+  used (file, entry count, gaps/conflicts, count match).
 - **Scanned-PDF OCR** — not built; scans are detected and refused honestly.
 - **Exam-question extraction depends on conventional layouts** ("1." stems,
   "A." choices, single-column). Real-world exam PDFs with tables, two-column

@@ -188,6 +188,83 @@ async function main() {
     "running headers and page numbers never leak into question text");
   ok(hard.sections.length === 1 && hard.sections[0].title === "The River", "section marker survives the cleanup");
 
+  // ---------- 11c. Class-results PDF parsing (the regression) ----------
+  console.log("Class-results PDF (item analysis):");
+  var rpdf = await ED.pdf.extractResults(fixture("results-report.pdf"), { defaultSection: "8C 2026" });
+  ok(rpdf.ok === true, "results PDF upload is accepted and parsed for real");
+  ok(rpdf.sections.length === 1 && rpdf.sections[0].id === "8C 2026", "one section, labeled from the file");
+  ok(rpdf.sections[0].responses === 26, "student count read from “Students: 26”");
+  ok(rpdf.sections[0].questionCount === 8, "8 question rows detected");
+  ok(rpdf.sections[0].questions[3].missedPct === 61, "Q3 percent missed derived from 39% correct");
+  ok(rpdf.sections[0].questions[1].keyedFromFile === "B", "keyed answer read from the report's Key column");
+  ok(rpdf.warnings.some(function (w) { return /percent CORRECT/.test(w); }), "interpretation of percentages stated honestly");
+
+  // PDF results flow into a real analysis — never demo numbers
+  var pdfAnalysis = ED.builder.build({
+    setup: { examName: "PDF Test", subject: "ELA", grade: "8" },
+    sections: rpdf.sections, key: ["B", "A", "C", "D", "A", "B", "C", "D"],
+    meta: { filesUploaded: 1, filesParsed: 1, unparsedFiles: [], analysisId: "an-pdf" },
+    keyInfo: { source: "answer-key.pdf — extracted", file: "answer-key.pdf", entries: 8, missing: [], conflicts: [] }
+  });
+  ok(pdfAnalysis.totalResponses === 26 && pdfAnalysis.sections.length === 1 && pdfAnalysis.totalQuestions === 8,
+    "analysis shows 26 students / 1 section / 8 questions — no demo fallback (not 129/5/75)");
+  ok(pdfAnalysis.flagged.some(function (f) { return f.number === 5; }), "Q5 (82% missed) is flagged from the PDF data");
+  ok(pdfAnalysis.keyProvenance && pdfAnalysis.keyProvenance.file === "answer-key.pdf" && pdfAnalysis.keyProvenance.entries === 8,
+    "analysis records which answer key was used");
+
+  // multiple files of mixed type build one combined analysis
+  var mixedAnalysis = ED.builder.build({
+    setup: { examName: "Mixed" },
+    sections: rpdf.sections.concat(res.sections), // PDF section + XLSX section
+    key: ["B", "A", "C", "D", "A", "B", "C", "D", "A", "B"],
+    meta: { filesUploaded: 2, filesParsed: 2, unparsedFiles: [] }
+  });
+  ok(mixedAnalysis.sections.length === 2 && mixedAnalysis.totalResponses === 38,
+    "PDF + XLSX files combine into one analysis (2 sections, 38 students)");
+
+  // wrong-document routing + specific failures
+  var keyInResults = await ED.pdf.extractResults(fixture("answer-key.pdf"), {});
+  ok(keyInResults.ok === false && /ANSWER KEY/.test(keyInResults.error) && /Step 4/.test(keyInResults.error),
+    "an answer key uploaded as results is detected and routed to Step 4");
+  var examInResults = await ED.pdf.extractResults(fixture("exam-questions.pdf"), {});
+  ok(examInResults.ok === false && /EXAM QUESTIONS/.test(examInResults.error) && /Step 3/.test(examInResults.error),
+    "exam questions uploaded as results are detected and routed to Step 3");
+  var scanResults = await ED.pdf.extractResults(fixture("scanned.pdf"), {});
+  ok(scanResults.ok === false && /OCR/.test(scanResults.error), "scanned results PDF refused with the OCR reason");
+  var encResults = await ED.pdf.extractResults(fixture("encoded.pdf"), {});
+  ok(encResults.ok === false && encResults.kind === "encoded", "custom-encoded results PDF refused, not garbled");
+  var noTable = await ED.pdf.extractResults(fixture("passage.pdf"), {});
+  ok(noTable.ok === false && /question-results table/i.test(noTable.error), "PDF without a results table gets a specific layout error");
+  ["isn’t built yet", "not built"].forEach(function (stale) {
+    [keyInResults, examInResults, scanResults, encResults, noTable].forEach(function (r) {
+      ok(String(r.error).indexOf(stale) === -1, "no stale “" + stale + "” language (" + (r.kind || "layout") + ")");
+    });
+  });
+
+  // ---------- 11d. Answer-key PDF formats & validation ----------
+  console.log("Answer-key PDF formats:");
+  var tkey = await ED.pdf.extractKey(fixture("answer-key-table.pdf"));
+  ok(tkey.ok === true && tkey.key.join("") === "BDACBACDAB",
+    "table-style key (cells on separate lines + compact multi-column row) parses");
+  ok(tkey.key[4] === "B", "lowercase letters normalized (5. b -> B)");
+  ok(tkey.found === 10 && tkey.missing.length === 0, "all 10 entries found");
+  var short = ED.pdf.keyFromText("1. A  2. B  3. C");
+  ok(short.ok === true && short.key.join("") === "ABC", "compact 3-entry numbered list parses");
+  var tooFew = ED.pdf.keyFromText("1. A  2. B");
+  ok(tooFew.ok === false && /no question→answer pairs|question→answer/i.test(tooFew.error),
+    "fewer than 3 pairs refused with the specific key error");
+  var dup = ED.pdf.keyFromText("1. A  2. B  3. C  2. D  4. A");
+  ok(dup.ok === true && dup.conflicts.length === 1 && dup.conflicts[0].q === 2,
+    "duplicate question numbers with different answers are flagged as conflicts");
+  var gap = ED.pdf.keyFromText("1. A  2. B  5. C");
+  ok(gap.ok === true && gap.missing.join(",") === "3,4", "missing question numbers are reported");
+  var scanKey = await ED.pdf.extractKey(fixture("scanned.pdf"));
+  ok(scanKey.ok === false && /scanned or image-only/.test(scanKey.error) && /text-based PDF|CSV|XLSX/.test(scanKey.error),
+    "scanned key PDF gets the specific scanned-key message");
+  var resultsAsKey = await ED.pdf.extractKey(fixture("results-report.pdf"));
+  ok(resultsAsKey.ok === false && /RESULTS report/.test(resultsAsKey.error) && /Step 2/.test(resultsAsKey.error),
+    "a results report uploaded as a key is detected and routed to Step 2");
+
   // ---------- 12. Passage PDF parsing + explicit-evidence linking ----------
   console.log("Passage PDFs & linking:");
   var passage = await ED.examText.parsePassagePDF(fixture("passage.pdf"), "passage");

@@ -1,10 +1,12 @@
 /* New Analysis wizard — 7 steps.
-   CSV and XLSX uploads are REALLY parsed (js/csv-parse.js,
-   js/xlsx-parse.js) and analyzed (js/analysis-builder.js). Answer keys
-   can be extracted from CSV/XLSX/text-based-PDF files (js/pdf-extract.js)
-   and always require review. Result PDFs are accepted but clearly marked
-   "not yet parsed" and never analyzed. Demo mode and uploaded mode are
-   mutually exclusive so results can never silently mix. */
+   CSV, XLSX, and text-based PDF result uploads are REALLY parsed
+   (js/csv-parse.js, js/xlsx-parse.js, js/pdf-extract.js) and analyzed
+   (js/analysis-builder.js). Answer keys can be extracted from
+   CSV/XLSX/text-based-PDF files and always require review; analysis
+   never runs without a key (no guessing, no reuse from a previous
+   analysis). Files that can't be parsed get specific per-file reasons.
+   Demo mode and uploaded mode are mutually exclusive so results can
+   never silently mix. */
 
 window.ED = window.ED || {};
 ED.views = ED.views || {};
@@ -185,8 +187,28 @@ ED.actions = ED.actions || {};
     var entered = keyEntered(s);
     if (lettersMode && !entered) {
       warns.push({ level: "alert", title: "Answer key needed", text: "Your files contain answer letters (A–D), which can only be scored against a key. Enter the key in Step 4 before running the analysis." });
-    } else if (entered && maxQ && entered < maxQ) {
-      warns.push({ level: "warn", title: "Key shorter than the exam", text: "The answer key has " + entered + " entries, but the files contain " + maxQ + " questions. Questions without a key entry " + (lettersMode ? "can’t be scored." : "can’t be key-checked.") });
+    } else if (!entered) {
+      warns.push({ level: "alert", title: "Answer key needed", text: "No answer key has been entered. Analysis won’t run without one — Exam Detective never guesses correct answers. Add it in Step 4." });
+    } else if (maxQ && entered !== maxQ) {
+      warns.push({
+        level: entered < maxQ ? "alert" : "warn", title: "Answer key doesn’t match the results",
+        text: "The answer key has answers for " + entered + " question" + (entered === 1 ? "" : "s") + ", but the student results contain " + maxQ + ". " +
+          (entered < maxQ
+            ? "Questions without a key entry " + (lettersMode ? "can’t be scored." : "can’t be key-checked.") + " Check that this key belongs to this exam."
+            : "Key entries beyond Q" + maxQ + " will be ignored — check that this key belongs to this exam.")
+      });
+    }
+    // key-file extraction quality (duplicates / gaps found in the key document)
+    if (s.keyExtraction && !s.keyExtraction.error) {
+      if ((s.keyExtraction.conflicts || []).length) {
+        warns.push({ level: "alert", title: "Answer key has conflicting entries",
+          text: "The key file gave more than one answer for Question" + (s.keyExtraction.conflicts.length === 1 ? "" : "s") + " " + s.keyExtraction.conflicts.join(", ") + ". The most frequent letter was kept — verify those entries in Step 4 before running." });
+      }
+      if ((s.keyExtraction.missing || []).length) {
+        var missL = s.keyExtraction.missing;
+        warns.push({ level: "warn", title: "Answer key has gaps",
+          text: "The key file had no answer for Question" + (missL.length === 1 ? "" : "s") + " " + missL.slice(0, 12).join(", ") + (missL.length > 12 ? "…" : "") + ". They’re blank in Step 4 — fill them in or they can’t be checked." });
+      }
     }
 
     secs.forEach(function (sec) {
@@ -353,11 +375,11 @@ ED.actions = ED.actions || {};
         '<h2>Step 2 · Upload Class Result Reports</h2>' +
         '<p class="mb-16">One result file per class section (or one XLSX workbook with one sheet per section).</p>' +
         '<div class="format-grid">' +
-          '<div class="format-cell live"><b>CSV · XLSX</b><span>Parsed for real — results are read straight from your file</span></div>' +
-          '<div class="format-cell planned"><b>PDF</b><span>Result PDFs are <b>not yet parsed</b> and won’t be analyzed. (Text-based PDF <i>answer keys</i> do work — Step 4.)</span></div>' +
+          '<div class="format-cell live"><b>CSV · XLSX · PDF</b><span>Parsed for real — results are read straight from your file. PDFs need a text-based item-analysis table (question + percent rows).</span></div>' +
+          '<div class="format-cell planned"><b>Limits</b><span>Scanned/photographed PDFs can’t be read (no OCR), and chart- or image-based PDF layouts get a specific refusal — never silent failure.</span></div>' +
         '</div>' +
         '<div class="upload-zone">' +
-          '<b>Choose result files</b><span class="muted"> — CSV or XLSX</span>' +
+          '<b>Choose result files</b><span class="muted"> — CSV, XLSX, or text-based PDF</span>' +
           '<input type="file" multiple accept=".csv,.xlsx,.pdf" data-change="wizard-add-results" aria-label="Upload class result reports">' +
           '<p class="small muted" style="margin-top:10px;">Layouts we read: one row per student (Q1, Q2, … columns with letters or correct/incorrect), or one row per question (Question + % Correct). In XLSX workbooks, every sheet is checked and sheet names become section labels. ' +
           '<button class="btn-link" data-action="wizard-sample-csv">Download a sample CSV</button></p>' +
@@ -542,12 +564,15 @@ ED.actions = ED.actions || {};
     }
 
     if (!secs.length) {
+      var reasonRows = (s.resultFiles || []).map(function (f) {
+        return '<li style="margin:4px 0;"><b>' + esc(f.name) + ':</b> ' + esc(f.statusText || "couldn’t be read") + '</li>';
+      }).join("");
       return (
         '<div class="card"><h2>Step 5 · Review Detected Data</h2>' +
-        '<div class="notice alert"><span class="notice-title">No analyzable data</span>' +
-          'You uploaded ' + meta.filesUploaded + ' file' + (meta.filesUploaded === 1 ? "" : "s") + ', but none could be parsed. ' +
-          (meta.unparsedFiles.length ? '<b>' + meta.unparsedFiles.map(esc).join(", ") + '</b> — PDF and XLSX parsing isn’t built yet, and files with errors can’t be read. ' : '') +
-          'Export your results as <b>CSV</b> from your assessment tool to analyze them now. There’s a sample CSV in Step 2 showing the layouts we read.</div>' +
+        '<div class="notice alert"><span class="notice-title">No analyzable data yet</span>' +
+          'You uploaded ' + meta.filesUploaded + ' file' + (meta.filesUploaded === 1 ? "" : "s") + ', but none produced readable results. Per-file reasons:' +
+          '<ul style="margin:8px 0 8px 18px;">' + reasonRows + '</ul>' +
+          'CSV, XLSX, and text-based PDF item-analysis reports are all parsed for real — fix the files above or re-export from your assessment tool, then re-upload in Step 2.</div>' +
         '</div>' +
         '<div class="wizard-nav"><a class="btn btn-outline" href="#/new-analysis/2">&larr; Back to uploads</a></div>'
       );
@@ -622,11 +647,30 @@ ED.actions = ED.actions || {};
       return { ok: false, why: "No files have been uploaded yet. Add your class result CSVs in Step 2, or load the demo files." };
     }
     if (!secs.length) {
-      return { ok: false, why: "None of the uploaded files could be parsed. PDF and XLSX parsing isn’t built yet — export your results as CSV to analyze them now. Exam Detective will not show results it didn’t actually compute." };
+      var reasons = (s.resultFiles || []).map(function (f) {
+        return esc(f.name) + " (" + esc(f.statusText || "couldn’t be read") + ")";
+      }).join("; ");
+      return { ok: false, why: "None of the uploaded files produced readable results: " + reasons + ". CSV, XLSX, and text-based PDF reports are all parsed for real — see the per-file details on Step 5, fix or re-export the files, and re-upload in Step 2. Exam Detective will not show results it didn’t actually compute." };
     }
     var lettersMode = secs.some(function (sec) { return sec.mode === "letters"; });
     if (lettersMode && !keyEntered(s)) {
-      return { ok: false, why: "Your files contain answer letters, which can only be scored against an answer key. Enter the key in Step 4 first." };
+      return { ok: false, why: "Your files contain answer letters, which can only be scored against an answer key. Add the key in Step 4 (upload a key file, paste it, or type it) — Exam Detective never guesses correct answers." };
+    }
+    // No key at all: refuse to run unless the result files themselves carry
+    // keyed answers for most questions. The app never guesses a key, and it
+    // never reuses a key from a previous analysis.
+    if (!keyEntered(s)) {
+      var totalQ = 0, keyedQ = 0;
+      secs.forEach(function (sec) {
+        for (var q = 1; q <= (sec.questionCount || 0); q++) {
+          totalQ++;
+          var qd = sec.questions && sec.questions[q];
+          if (qd && qd.keyedFromFile) keyedQ++;
+        }
+      });
+      if (!totalQ || keyedQ / totalQ < 0.5) {
+        return { ok: false, why: "No answer key yet. Analysis can’t run without one — Exam Detective never guesses correct answers and never reuses a key from a previous analysis. Add the key in Step 4: upload a key file (PDF, CSV, or XLSX), paste it, or type it." + (keyedQ ? " (Some keyed answers were found inside the result files, but they cover too little of the exam.)" : "") };
+      }
     }
     return { ok: true };
   }
@@ -821,15 +865,20 @@ ED.actions = ED.actions || {};
         };
         xreader.readAsArrayBuffer(f);
       } else if (ext === "pdf") {
-        s.resultFiles.push({
-          name: f.name, status: "unsupported",
-          statusText: "Result PDFs aren’t parsed yet. Export this report as CSV or XLSX to analyze it now. (PDF answer keys are different — those work in Step 4.)"
-        });
-        done();
+        var preader = new FileReader();
+        preader.onload = function () {
+          ED.pdf.extractResults(preader.result, { defaultSection: f.name.replace(/\.[^.]+$/, "") })
+            .then(function (res) { pushParsed(f, res); done(); });
+        };
+        preader.onerror = function () {
+          s.resultFiles.push({ name: f.name, status: "error", statusText: "The file couldn’t be read from disk. Try re-selecting it." });
+          done();
+        };
+        preader.readAsArrayBuffer(f);
       } else {
         s.resultFiles.push({
           name: f.name, status: "error",
-          statusText: "Unsupported file type (." + ext + "). Use a CSV or XLSX export."
+          statusText: "Unsupported file type (." + ext + "). Use a CSV, XLSX, or text-based PDF export."
         });
         done();
       }
@@ -1053,12 +1102,20 @@ ED.actions = ED.actions || {};
       var evd = examEvidence(s);
       var meta = uploadMeta(s);
       meta.analysisId = s.analysisId; // ties the results to this wizard session
+      var enteredCount = keyEntered(s);
       var analysis = ED.builder.build({
         setup: s.setup,
         sections: secs,
         key: key.some(function (L) { return L; }) ? key : null,
         meta: meta,
-        examEvidence: evd
+        examEvidence: evd,
+        keyInfo: {
+          source: s.keySource || (enteredCount ? "Entered manually" : "Keyed answers inside the uploaded result files"),
+          file: s.keyExtraction && !s.keyExtraction.error ? s.keyExtraction.file : null,
+          entries: enteredCount,
+          missing: (s.keyExtraction && s.keyExtraction.missing) || [],
+          conflicts: (s.keyExtraction && s.keyExtraction.conflicts) || []
+        }
       });
       ED.data.setActiveUploaded(analysis);
       var students = analysis.totalResponses;

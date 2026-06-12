@@ -581,6 +581,9 @@ window.ED = window.ED || {};
             " excluded from scoring and flags, not counted as missed."
           : ""),
       dataQuality: { noResponses: noResponseQs },
+      // which answer key produced these results (file, coverage, caveats) —
+      // shown in the Key Audit Summary so reports state their key source
+      keyProvenance: input.keyInfo || null,
       evidenceSummary: ev ? {
         withText: evInRange,
         total: totalQuestions,

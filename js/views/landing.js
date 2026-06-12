@@ -80,7 +80,7 @@ ED.views.landing = function () {
           ["Do I need student-level data?", "No. Exam Detective is built for the aggregate class reports most assessment tools export — response counts, averages, and question-by-question percentages. It never asks for student names."],
           ["Will it change my gradebook?", "No. Exam Detective only recommends. Rescoring decisions always stay with you and your department."],
           ["What if a question was just hard?", "Hard isn’t the same as broken. If the key is defensible and the answer pattern looks reasonable, the question is labeled “Hard but Fair” and no grading change is suggested."],
-          ["What file types work?", "PDF, CSV, and XLSX class result reports, plus the exam questions, reading booklet, and answer key in common formats. (In this demo build, parsing is simulated with realistic sample data.)"],
+          ["What file types work?", "Class results: CSV, XLSX, and text-based PDF item-analysis reports — all genuinely parsed. Answer keys: CSV/XLSX (Question + Key columns), text-based PDF, pasted, or typed. Exam questions and passages: text-based PDF or TXT. Scanned/photographed PDFs can’t be read yet (no OCR) and are refused with a clear reason."],
           ["Is this a gradebook or student tracker?", "Neither. It reviews questions, not students. The output is a list of exam questions to fix, rescore, drop, or keep — and a clean report to share."]
         ].map(function (f) {
           return '<details><summary>' + f[0] + '</summary><div>' + f[1] + '</div></details>';

@@ -391,6 +391,72 @@ ED.data.setActiveUploaded(catAn);
 ok(ED.views.reports("teacher-review").indexOf("AI-ASSISTED FEEDBACK") === -1,
   "no AI block in reports when no feedback exists");
 
+// ---------- 16. Answer-key gate & provenance ----------
+console.log("Answer-key gate (never guess, never reuse):");
+ED.wizard.startFresh();
+var gateState = ED.wizard.getState();
+var noKeyAgg = ED.csv.parseResults("Question,Responses,% Correct\n1,20,80\n2,20,70\n3,20,60\n4,20,50\n5,20,40", { defaultSection: "8A" });
+gateState.setup = { examName: "Gate", subject: "ELA", grade: "8", sections: "", notes: "" };
+gateState.resultFiles = [{ name: "8A.csv", label: "8A", status: "parsed", format: "question summary", sections: noKeyAgg.sections }];
+ED.wizard.setState(gateState);
+var step6NoKey = ED.views.wizard("6");
+ok(step6NoKey.indexOf("Can’t run yet") !== -1 && step6NoKey.indexOf("never guesses correct answers") !== -1,
+  "analysis is blocked without an answer key, with a clear explanation");
+ok(ED.views.wizard("5").indexOf("Answer key needed") !== -1, "review step says the key is missing");
+gateState = ED.wizard.getState();
+gateState.key = ["A", "B", "C", "D", "A"]; gateState.keyCount = 5;
+ED.wizard.setState(gateState);
+ok(ED.views.wizard("6").indexOf("Run Analysis") !== -1, "entering the key unblocks the run");
+// key/results count mismatch warning (the user's exact failure mode)
+gateState = ED.wizard.getState();
+gateState.key = ["A", "B", "C"]; gateState.keyCount = 3;
+ED.wizard.setState(gateState);
+var mism = ED.views.wizard("5");
+ok(mism.indexOf("answers for 3 questions, but the student results contain 5") !== -1,
+  "key/results count mismatch reported in plain language");
+// files that carry their own keys (aggregate Key column) may run without a typed key
+gateState = ED.wizard.getState();
+gateState.key = []; gateState.keyCount = 0;
+gateState.resultFiles = [{ name: "8A.csv", label: "8A", status: "parsed", format: "question summary", sections: ED.csv.parseResults(fixture("aggregate-summary.csv"), { defaultSection: "8A" }).sections }];
+ED.wizard.setState(gateState);
+ok(ED.views.wizard("6").indexOf("Run Analysis") !== -1, "files with embedded keyed answers can run without a typed key");
+
+console.log("Key provenance on results:");
+var provAnalysis = ED.builder.build({
+  setup: { examName: "Prov", subject: "ELA", grade: "8" },
+  sections: res.sections, key: KEY,
+  meta: { filesUploaded: 1, filesParsed: 1, unparsedFiles: [], analysisId: "an-prov" },
+  keyInfo: { source: "8C key.pdf — extracted, review below", file: "8C key.pdf", entries: 10, missing: [], conflicts: [4] }
+});
+ED.data.setActiveUploaded(provAnalysis);
+var provHtml = ED.views.results();
+ok(provHtml.indexOf("Answer key used:") !== -1 && provHtml.indexOf("8C key.pdf") !== -1,
+  "results page states which answer key file was used");
+ok(provHtml.indexOf("10 answers extracted") !== -1 && provHtml.indexOf("matches the 10 questions") !== -1,
+  "results state extraction count and that it matches the question count");
+ok(provHtml.indexOf("Conflicting entries") !== -1 && provHtml.indexOf("Q4") !== -1,
+  "key warnings (conflicts) surface on the results page");
+var mismatchAnalysis = ED.builder.build({
+  setup: { examName: "Prov2" }, sections: res.sections, key: KEY,
+  meta: { filesUploaded: 1, filesParsed: 1, unparsedFiles: [] },
+  keyInfo: { source: "Entered manually", file: null, entries: 8, missing: [], conflicts: [] }
+});
+ED.data.setActiveUploaded(mismatchAnalysis);
+ok(ED.views.results().indexOf("count mismatch") !== -1,
+  "key shorter than the results is flagged as a count mismatch on the results page");
+
+console.log("No key reuse across analyses:");
+var withKey = ED.wizard.getState();
+withKey.key = ["A", "B", "C"]; withKey.keyCount = 3;
+withKey.keyExtraction = { file: "old-key.pdf", found: 3, missing: [], conflicts: [] };
+withKey.keySource = "old-key.pdf — extracted";
+ED.wizard.setState(withKey);
+ED.wizard.startFresh();
+var freshKeyState = ED.wizard.getState();
+ok(freshKeyState.key.length === 0 && freshKeyState.keyCount === 0 && !freshKeyState.keyExtraction && !freshKeyState.keySource,
+  "a new analysis never reuses the previous analysis's answer key");
+ok(ED.views.wizard("4").indexOf("old-key.pdf") === -1, "step 4 shows no trace of the old key file");
+
 // ---------- result ----------
 if (failures.length) {
   console.error("\nFAILURES:");

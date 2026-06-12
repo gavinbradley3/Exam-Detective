@@ -233,7 +233,7 @@ ED.actions = ED.actions || {};
     var blob = new Blob([ED.analysis.toCSV(rows)], { type: "text/csv" });
     var aEl = document.createElement("a");
     aEl.href = URL.createObjectURL(blob);
-    aEl.download = "department-review-list" + (an.source === "demo" ? "-DEMO" : "") + ".csv";
+    aEl.download = ED.analysis.exportName(an, "department-review", "csv");
     document.body.appendChild(aEl);
     aEl.click();
     document.body.removeChild(aEl);

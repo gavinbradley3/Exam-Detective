@@ -235,14 +235,13 @@ ED.actions = ED.actions || {};
     if (!body) return;
     var reportId = el.getAttribute("data-report") || "report";
     var an = ED.data.activeAnalysis();
-    var srcSuffix = an && an.source === "demo" ? "-DEMO" : "";
 
     fetch("css/report.css")
       .then(function (r) { if (!r.ok) throw new Error("css"); return r.text(); })
       .then(function (css) {
         var doc = "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\">\n" +
           "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n" +
-          "<title>" + REPORTS[reportId].title + (srcSuffix ? " (DEMO DATA)" : "") + " — Exam Detective</title>\n" +
+          "<title>" + REPORTS[reportId].title + (an && an.source === "demo" ? " (DEMO DATA)" : "") + " — Exam Detective</title>\n" +
           '<link rel="preconnect" href="https://fonts.googleapis.com">\n' +
           '<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=PT+Serif:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">\n' +
           "<style>\nbody{margin:0;background:#fff;}\n" + css + "\n</style>\n</head>\n<body>\n" +
@@ -250,7 +249,7 @@ ED.actions = ED.actions || {};
         var blob = new Blob([doc], { type: "text/html" });
         var a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
-        a.download = "exam-detective-" + reportId + srcSuffix + ".html";
+        a.download = an ? ED.analysis.exportName(an, reportId, "html") : "exam-detective-" + reportId + ".html";
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);

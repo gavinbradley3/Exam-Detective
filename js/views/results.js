@@ -148,7 +148,7 @@ ED.actions = ED.actions || {};
     var blob = new Blob([ED.analysis.toCSV(exportRows(an))], { type: "text/csv" });
     var a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "exam-detective-" + (an.source === "demo" ? "DEMO-data" : "uploaded-data") + ".csv";
+    a.download = ED.analysis.exportName(an, "data", "csv");
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
   };

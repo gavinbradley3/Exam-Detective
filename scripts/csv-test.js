@@ -26,10 +26,12 @@ var root = path.join(__dirname, "..");
   "js/analysis.js",
   "js/csv-parse.js",
   "js/analysis-builder.js",
+  "js/ai-feedback.js",
   "js/data-store.js",
   "js/cloud.js",
   "js/report-blocks.js",
   "js/views/settings.js",
+  "js/views/reports.js",
   "js/views/wizard.js",
   "js/views/results.js"
 ].forEach(function (f) { require(path.join(root, f)); });
@@ -362,6 +364,32 @@ var cs = ED.cloud.status();
 ok(cs.configured === false && cs.hasConfig === true && /isn’t built/.test(cs.message),
   "even with config present, the unbuilt sync layer is reported honestly");
 delete global.ED_CONFIG;
+
+// ---------- 15. Export filenames & AI feedback in exports ----------
+console.log("Exports:");
+catAn.grade = "8"; catAn.subject = "ELA"; catAn.dateCreated = "2026-06-12";
+var fname = ED.analysis.exportName(catAn, "data", "csv");
+ok(fname === "exam-detective_categories_grade8_ela_2026-06-12_uploaded_data.csv",
+  "uploaded export filename carries exam/grade/subject/date/source (" + fname + ")");
+var dname = ED.analysis.exportName(ED.data.demoAnalysis(), "teacher-review", "html");
+ok(dname.indexOf("_DEMO_") !== -1 && dname.indexOf("grade8") !== -1, "demo export filename carries the DEMO marker");
+
+var fbStub = {
+  issueSummary: "Choice B competed with the key.",
+  likelyIssueType: "Possible distractor issue",
+  evidenceBasedExplanation: "B drew 40% against the keyed A.",
+  teacherReviewActions: ["Read choice B against the key"],
+  suggestedRevision: null, confidence: "Medium", limitations: []
+};
+catAn.aiFeedback = { 2: { feedback: fbStub, extractionStatus: "none" } };
+ED.data.setActiveUploaded(catAn);
+var reportHtml = ED.views.reports("teacher-review");
+ok(reportHtml.indexOf("AI-ASSISTED FEEDBACK") !== -1 && reportHtml.indexOf("Choice B competed") !== -1,
+  "stored AI feedback appears in the exported/printed report");
+delete catAn.aiFeedback;
+ED.data.setActiveUploaded(catAn);
+ok(ED.views.reports("teacher-review").indexOf("AI-ASSISTED FEEDBACK") === -1,
+  "no AI block in reports when no feedback exists");
 
 // ---------- result ----------
 if (failures.length) {

@@ -96,6 +96,21 @@ window.ED = window.ED || {};
 
   function pct(n) { return n + "%"; }
 
+  // Export filename with the analysis's own metadata — exam, grade,
+  // subject, date, and an unmissable DEMO marker for demo data.
+  function slug(s) {
+    return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+  }
+  function exportName(an, label, ext) {
+    var parts = ["exam-detective", slug(an.examName)];
+    if (an.grade) parts.push("grade" + slug(an.grade));
+    if (an.subject) parts.push(slug(an.subject));
+    parts.push(an.dateCreated || new Date().toISOString().slice(0, 10));
+    parts.push(an.source === "demo" ? "DEMO" : "uploaded");
+    if (label) parts.push(slug(label));
+    return parts.filter(Boolean).join("_") + "." + ext;
+  }
+
   // CSV builder for exportable lists (Department Review List).
   function toCSV(rows) {
     return rows.map(function (row) {
@@ -116,6 +131,7 @@ window.ED = window.ED || {};
     DEMO_WARNINGS: DEMO_WARNINGS,
     esc: esc,
     pct: pct,
-    toCSV: toCSV
+    toCSV: toCSV,
+    exportName: exportName
   };
 })();

@@ -552,6 +552,16 @@ table.data .qlink:hover { text-decoration: underline; }
   display: flex; justify-content: space-between; align-items: center;
   gap: 14px; flex-wrap: wrap;
 }
+.saved-row.archived { opacity: 0.65; }
+.saved-controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+.saved-controls input[type="text"] {
+  flex: 1 1 260px; font-family: inherit; font-size: 14px;
+  padding: 9px 12px; border: 1px solid var(--slate-border); border-radius: 9px; background: #fff;
+}
+.saved-controls select {
+  font-family: inherit; font-size: 13.5px; padding: 9px 10px;
+  border: 1px solid var(--slate-border); border-radius: 9px; background: #fff;
+}
 
 /* ---------- Sign in ---------- */
 

@@ -73,19 +73,24 @@ window.ED = window.ED || {};
     var wizard = read("examdetective.wizard", null);
     var settings = read("examdetective.settings", null);
     var entry = {
-      id: "save-" + Date.now(),
+      id: "save-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6),
       name: name || (an ? an.examName : "Analysis") + " — " + new Date().toLocaleDateString(),
       savedAt: new Date().toISOString(),
+      modifiedAt: new Date().toISOString(),
+      archived: false,
       source: rec.source,
       active: rec,
       wizard: wizard,
       settings: settings,
       summary: an ? {
         examName: an.examName,
+        grade: an.grade || "",
+        subject: an.subject || "",
         sections: an.sections.length,
         students: an.totalResponses,
         questions: an.totalQuestions,
-        flagged: an.flagged.length
+        flagged: an.flagged.length,
+        files: an.uploadedMeta ? an.uploadedMeta.filesUploaded : 0
       } : null
     };
     var all = listSaved();
@@ -107,6 +112,55 @@ window.ED = window.ED || {};
 
   function deleteSaved(id) {
     write(SAVED_KEY, listSaved().filter(function (e) { return e.id !== id; }));
+  }
+
+  function updateSaved(id, fn) {
+    var all = listSaved();
+    var entry = all.filter(function (e) { return e.id === id; })[0];
+    if (!entry) return { ok: false, error: "That saved analysis wasn’t found." };
+    fn(entry);
+    entry.modifiedAt = new Date().toISOString();
+    write(SAVED_KEY, all);
+    return { ok: true, entry: entry };
+  }
+
+  function renameSaved(id, name) {
+    if (!name || !String(name).trim()) return { ok: false, error: "Give it a name first." };
+    return updateSaved(id, function (e) { e.name = String(name).trim(); });
+  }
+
+  function setArchived(id, archived) {
+    return updateSaved(id, function (e) { e.archived = !!archived; });
+  }
+
+  // Duplicate = an independent deep copy with its own id; editing or
+  // reopening the copy can never touch the original.
+  function duplicateSaved(id) {
+    var entry = listSaved().filter(function (e) { return e.id === id; })[0];
+    if (!entry) return { ok: false, error: "That saved analysis wasn’t found." };
+    var copy = JSON.parse(JSON.stringify(entry));
+    copy.id = "save-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
+    copy.name = entry.name + " (copy)";
+    copy.savedAt = new Date().toISOString();
+    copy.modifiedAt = copy.savedAt;
+    copy.archived = false;
+    var all = listSaved();
+    all.unshift(copy);
+    if (!write(SAVED_KEY, all)) return { ok: false, error: "Couldn’t save the copy — local storage is full." };
+    return { ok: true, entry: copy };
+  }
+
+  // Search/filter over saved entries (pure; tested directly).
+  function filterSaved(entries, query, show) {
+    var q = String(query || "").toLowerCase().trim();
+    return entries.filter(function (e) {
+      if (show === "archived" && !e.archived) return false;
+      if (show !== "archived" && e.archived) return false;
+      if (!q) return true;
+      var hay = [e.name, e.source, e.summary && e.summary.examName,
+        e.summary && e.summary.grade, e.summary && e.summary.subject].join(" ").toLowerCase();
+      return hay.indexOf(q) !== -1;
+    });
   }
 
   // ---------- JSON backup (export / import) ----------
@@ -156,6 +210,10 @@ window.ED = window.ED || {};
     saveCurrent: saveCurrent,
     reopenSaved: reopenSaved,
     deleteSaved: deleteSaved,
+    renameSaved: renameSaved,
+    duplicateSaved: duplicateSaved,
+    setArchived: setArchived,
+    filterSaved: filterSaved,
     exportBackup: exportBackup,
     importBackup: importBackup,
     getProfile: getProfile,

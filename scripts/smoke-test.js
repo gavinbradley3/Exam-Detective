@@ -31,6 +31,8 @@ var root = path.join(__dirname, "..");
   "js/exam-parse.js",
   "js/analysis-builder.js",
   "js/data-store.js",
+  "js/cloud.js",
+  "js/ai-feedback.js",
   "js/report-blocks.js",
   "js/views/landing.js",
   "js/views/dashboard.js",
@@ -73,7 +75,7 @@ check("results (empty)", ED.views.results(), ["no analysis has been run", "Open 
 check("comparison (empty)", ED.views.comparison(), ["Nothing to compare"]);
 check("reports (empty)", ED.views.reports(), ["none has been run"]);
 check("login", ED.views.login(), ["Sign in with Google", "Not connected", "local profile", "AUTH_AND_STORAGE_PLAN"]);
-check("saved (empty)", ED.views.saved(), ["Nothing saved yet", "local storage"]);
+check("saved (empty)", ED.views.saved(), ["Nothing saved yet", "local storage", "Cloud sync", "Not configured"]);
 check("help", ED.views.help(), ["Possible Key Error", "Hard but Fair", "before changing marks"]);
 check("settings", ED.views.settings(), ["Default subject", "Still to decide", "Responsible use", 'value=""']);
 
@@ -195,7 +197,7 @@ check("question bank (demo)", ED.views.reports("question-bank"), ["Keep, Revise,
 
 console.log("— Saved analyses view with content —");
 ED.data.saveCurrent("Demo save");
-check("saved (with entry)", ED.views.saved(), ["Demo save", "Reopen", "Export backup"]);
+check("saved (with entry)", ED.views.saved(), ["Demo save", "Reopen", "Rename", "Duplicate", "Archive", "Export backup", "Search by name"]);
 
 console.log("— New Analysis clean slate —");
 // at this point old wizard state (files, key, exam text) and an active

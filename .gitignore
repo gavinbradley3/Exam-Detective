@@ -10,6 +10,7 @@ out/
 # Environment / secrets
 .env
 .env.*
+js/config.js
 
 # Uploaded exam material — never commit real exam files, keys, or class data
 uploads/

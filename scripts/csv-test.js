@@ -27,6 +27,7 @@ var root = path.join(__dirname, "..");
   "js/csv-parse.js",
   "js/analysis-builder.js",
   "js/data-store.js",
+  "js/cloud.js",
   "js/report-blocks.js",
   "js/views/settings.js",
   "js/views/wizard.js",
@@ -322,6 +323,45 @@ ok(card5.indexOf("CAN’T CONFIDENTLY SAY") !== -1, "limitations block renders")
 var card2 = ED.blocks.questionCard(catAn, fOf(2));
 ok(card2.indexOf("flag-cat") !== -1 && card2.indexOf("sev-med") !== -1, "category and severity chips render");
 ok(card2.indexOf("% CORRECT") !== -1, "percent-correct stat renders");
+
+// ---------- 14. Saved-analysis management + honest cloud state ----------
+console.log("Saved-analysis management:");
+localStorage.setItem("examdetective.saved", "[]");
+ED.data.setActiveUploaded(catAn);
+var saveA = ED.data.saveCurrent("Period 3 ELA");
+ok(saveA.ok && saveA.entry.summary.grade === "" && saveA.entry.summary.students === 20 && saveA.entry.archived === false,
+  "saved entry carries metadata (students, archived flag)");
+var ren = ED.data.renameSaved(saveA.entry.id, "Period 3 ELA — final");
+ok(ren.ok && ED.data.listSaved()[0].name === "Period 3 ELA — final" && !!ren.entry.modifiedAt, "rename works and stamps modifiedAt");
+ok(ED.data.renameSaved(saveA.entry.id, "  ").ok === false, "blank rename rejected with a message");
+
+var dup = ED.data.duplicateSaved(saveA.entry.id);
+ok(dup.ok && dup.entry.id !== saveA.entry.id && /\(copy\)$/.test(dup.entry.name), "duplicate creates an independent copy");
+ED.data.renameSaved(dup.entry.id, "Renamed copy");
+ok(ED.data.listSaved().filter(function (e) { return e.id === saveA.entry.id; })[0].name === "Period 3 ELA — final",
+  "editing the copy never touches the original");
+
+ED.data.setArchived(dup.entry.id, true);
+ok(ED.data.filterSaved(ED.data.listSaved(), "", "active").length === 1, "archived entries leave the active list");
+ok(ED.data.filterSaved(ED.data.listSaved(), "", "archived").length === 1, "archived view shows them");
+ok(ED.data.filterSaved(ED.data.listSaved(), "period 3", "active").length === 1 &&
+   ED.data.filterSaved(ED.data.listSaved(), "zzz", "active").length === 0, "search filters by name");
+
+// saving never contaminates a new analysis
+ED.wizard.startFresh();
+ok(ED.wizard.getState().resultFiles.length === 0 && ED.data.getActiveRecord() === null &&
+   ED.data.listSaved().length === 2, "fresh start leaves saved analyses intact and the workspace empty");
+var reA = ED.data.reopenSaved(saveA.entry.id);
+ok(reA.ok && ED.data.activeAnalysis().totalResponses === 20, "reopening loads exactly that saved analysis");
+
+console.log("Cloud status (honest):");
+ok(ED.cloud.status().configured === false && /not configured|AUTH_AND_STORAGE/i.test(ED.cloud.status().message),
+  "cloud sync says honestly that it isn't configured");
+global.ED_CONFIG = { supabaseUrl: "https://x.supabase.co", supabaseAnonKey: "a-very-long-fake-anon-key-value" };
+var cs = ED.cloud.status();
+ok(cs.configured === false && cs.hasConfig === true && /isn’t built/.test(cs.message),
+  "even with config present, the unbuilt sync layer is reported honestly");
+delete global.ED_CONFIG;
 
 // ---------- result ----------
 if (failures.length) {

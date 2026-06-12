@@ -129,7 +129,7 @@ window.ED = window.ED || {};
       rows.map(function (f) {
         return '<tr>' +
           '<td class="qn">Q' + f.number + '</td>' +
-          '<td class="pct">' + f.combined + '%</td>' +
+          '<td class="pct">' + (f.noData ? "—" : f.combined + "%") + '</td>' +
           '<td>' + (f.classesAffected.length === an.sections.length ? "All " + an.sections.length : f.classesAffected.join(", ")) + '</td>' +
           '<td>' + A().esc(f.pattern) + '</td>' +
           '<td>' + flagBadge(f.flag) + '</td>' +
@@ -179,16 +179,29 @@ window.ED = window.ED || {};
     var st = A().statsFor(an, f.number);
     var html = '<div class="qcard" id="q' + f.number + '">';
 
-    // Stat block row
+    // Stat block row — missing-data cards show dashes, never fake rates
+    var noData = !!f.noData;
+    var dash = function (v, suffix) { return noData ? "—" : v + (suffix || ""); };
+    var sevCls = { "High": "sev-high", "Medium": "sev-med", "Low": "sev-low", "Data gap": "sev-gap" }[f.severity] || "sev-low";
     html +=
       '<div class="qcard-top">' +
         '<div class="qnum-box"><span class="lbl">QUESTION</span><span class="num">' + f.number + '</span></div>' +
         '<div class="qstats">' +
-          '<div class="qstat"><span class="lbl">MIN MISSED</span><span class="val maroon">' + st.minMissed + '%</span></div>' +
-          '<div class="qstat"><span class="lbl">MAX MISSED</span><span class="val maroon">' + st.maxMissed + '%</span></div>' +
-          '<div class="qstat"><span class="lbl">COMBINED</span><span class="val dark">~' + st.combinedMissed + '%</span></div>' +
+          '<div class="qstat"><span class="lbl">MIN MISSED</span><span class="val maroon">' + dash(st.minMissed, "%") + '</span></div>' +
+          '<div class="qstat"><span class="lbl">MAX MISSED</span><span class="val maroon">' + dash(st.maxMissed, "%") + '</span></div>' +
+          '<div class="qstat"><span class="lbl">COMBINED</span><span class="val dark">' + (noData ? "—" : "~" + st.combinedMissed + "%") + '</span></div>' +
+          (f.percentCorrect !== undefined
+            ? '<div class="qstat"><span class="lbl">% CORRECT</span><span class="val dark">' + (f.percentCorrect === null ? "—" : f.percentCorrect + "%") + '</span></div>'
+            : '') +
+          (f.blankRate !== undefined && f.blankRate !== null && f.blankRate > 0 && !noData
+            ? '<div class="qstat"><span class="lbl">BLANK</span><span class="val maroon">' + f.blankRate + '%</span></div>'
+            : '') +
         '</div>' +
-        '<div class="qflagline">' + flagBadge(f.flag) +
+        '<div class="qflagline">' +
+          (f.severity ? '<span class="flag ' + sevCls + '" title="Severity from the data rules">' + A().esc(f.severity) + '</span> ' : '') +
+          flagBadge(f.flag) +
+          (f.issueCategory ? ' <span class="flag flag-cat" title="Issue category (deterministic data rule)">' + A().esc(f.issueCategory) + '</span>' : '') +
+          (f.secondaryCategory ? ' <span class="flag flag-cat">' + A().esc(f.secondaryCategory) + '</span>' : '') +
           (f.secondaryFlags || []).map(flagBadge).join(" ") +
           (f.evidence ? ' <span class="flag flag-evidence" title="What uploaded evidence is available for this question">' + A().esc(f.evidence) + '</span>' : '') +
         '</div>' +
@@ -217,6 +230,14 @@ window.ED = window.ED || {};
       html += '<p class="immediate" style="margin-bottom:0;">' + (f.nextYearNote || "Keep the question as written.") + '</p>';
     }
     html += '</div>';
+
+    // Per-card honesty: what the data rules can NOT establish
+    if (f.limitations && f.limitations.length) {
+      html += '<div class="label-line limits"><span class="dot" aria-hidden="true"></span>WHAT THE APP CAN’T CONFIDENTLY SAY</div>' +
+        '<ul class="limits-list">' + f.limitations.map(function (l) {
+          return '<li>' + A().esc(l) + '</li>';
+        }).join("") + '</ul>';
+    }
 
     // Advanced details — collapsed by default, hidden when printing
     if (f.advanced && !opts.hideAdvanced) {

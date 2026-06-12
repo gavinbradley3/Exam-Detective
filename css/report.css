@@ -261,6 +261,14 @@
 .report .label-line.problem .dot { background: var(--r-red); }
 .report .label-line.fix { color: var(--r-teal); }
 .report .label-line.fix .dot { background: var(--r-teal); }
+.report .label-line.limits { color: #6a776f; }
+.report .label-line.limits .dot { background: #9aa7a0; }
+.report .limits-list {
+  list-style: none; padding: 0; margin: 0;
+  font-family: 'Archivo', sans-serif; font-size: 12px; line-height: 1.55; color: #57645e;
+}
+.report .limits-list li { padding: 2px 0 2px 14px; position: relative; }
+.report .limits-list li::before { content: "–"; position: absolute; left: 0; color: #9aa7a0; }
 
 .report .prose {
   font-family: 'Archivo', sans-serif;

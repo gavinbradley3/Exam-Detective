@@ -26,8 +26,10 @@ window.ED = window.ED || {};
     { label: "Hard but Fair",           cls: "flag-fair", priority: 6,
       meaning: "Many students missed it, but the key is defensible and the choices are reasonable. No grading change." },
     { label: "Watch List",              cls: "flag-watch", priority: 7,
-      meaning: "Not clearly broken, but the data suggests possible concern. Worth a teacher's eyes." },
-    { label: "No Action Needed",        cls: "flag-ok", priority: 8,
+      meaning: "The question is not clearly broken, but the data suggests possible concern. Worth a teacher's eyes." },
+    { label: "Missing Response Data",   cls: "flag-watch", priority: 8,
+      meaning: "No usable student responses were recorded for this question, so it can't be analyzed — check the source export." },
+    { label: "No Action Needed",        cls: "flag-ok", priority: 9,
       meaning: "The question performed normally and the key appears correct." }
   ];
 

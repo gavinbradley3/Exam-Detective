@@ -251,7 +251,9 @@ var pb = ED.csv.parseResults(blankCsv, {});
 ok(pb.ok === true && pb.sections[0].responses === 4, "csv with an all-blank question column parses");
 var anBlank = ED.builder.build({ setup: { examName: "Blank Q" }, sections: pb.sections, key: ["A", "B", "C", "D", "A"], meta: { filesUploaded: 1, filesParsed: 1, unparsedFiles: [] } });
 ok(anBlank.dataQuality.noResponses.indexOf(5) !== -1, "Q5 reported as missing response data");
-ok(!anBlank.flagged.some(function (f) { return f.number === 5; }), "Q5 gets NO flags and no answer-choice suggestions");
+var blankQ5 = anBlank.flagged.filter(function (f) { return f.number === 5; })[0];
+ok(!!blankQ5 && blankQ5.flag === "Missing Response Data" && blankQ5.noData === true && blankQ5.options.length === 0,
+  "Q5 gets only a Missing Response Data card — no answer-choice suggestions");
 ok(anBlank.allQuestions[4].unscored === true, "Q5 is unscored — not treated as 100% missed");
 ok(anBlank.openingSummary.indexOf("no recorded student responses") !== -1, "opening summary explains the exclusion in plain language");
 ok(anBlank.sections[0].average === Math.round((100 + 100 + 75 + 75) / 4), "student averages exclude the blank question from the denominator");
@@ -260,6 +262,66 @@ sBlank.setup = { examName: "Blank Q", subject: "ELA", grade: "8", sections: "", 
 sBlank.resultFiles = [{ name: "blank.csv", label: "8A", status: "parsed", format: "student rows", sections: pb.sections }];
 ED.wizard.setState(sBlank);
 ok(ED.views.wizard("5").indexOf("No responses for some questions") !== -1, "review step warns about blank questions before the run");
+
+// ---------- 13. Deterministic issue categories & report quality ----------
+console.log("Issue categories (deterministic rules):");
+// 20 students, key A A A A A; distributions crafted per category rule.
+var alloc = {
+  1: { A: 2, B: 14, C: 2, D: 2 },  // decisive vote against key  -> Possible key error
+  2: { A: 7, B: 8, C: 3, D: 2 },   // one strong distractor      -> Possible distractor issue
+  3: { A: 6, B: 5, C: 5, D: 4 },   // scattered votes            -> Possible wording issue
+  4: { A: 8, B: 4, C: 4, D: 4 },   // hard, keyed still leads    -> reteaching candidate
+  5: null                          // all blank                  -> Missing response data
+};
+var catRows = ["Student,Section,Q1,Q2,Q3,Q4,Q5"];
+for (var st = 0; st < 20; st++) {
+  var cells = [];
+  [1, 2, 3, 4, 5].forEach(function (q) {
+    if (!alloc[q]) { cells.push(""); return; }
+    var n = st, pick = "";
+    ["A", "B", "C", "D"].some(function (L) {
+      if (n < alloc[q][L]) { pick = L; return true; }
+      n -= alloc[q][L]; return false;
+    });
+    cells.push(pick);
+  });
+  catRows.push("S" + (st + 1) + ",8A," + cells.join(","));
+}
+var catParsed = ED.csv.parseResults(catRows.join("\n"), {});
+var catEv = {
+  questions: { 3: { stem: "Which line shows the change?", options: { A: "line 1", B: "line 2", C: "line 3", D: "line 4" }, complete: true } },
+  sections: [{ title: "The Story", from: 1, to: 5, passage: { title: "The Story" } }],
+  passages: [{ title: "The Story", file: "p.pdf", linked: true, from: 1, to: 5, how: "marker", ranges: [] }],
+  coverage: { withText: 1, complete: 1, incomplete: [] }, warnings: []
+};
+var catAn = ED.builder.build({
+  setup: { examName: "Categories" }, sections: catParsed.sections,
+  key: ["A", "A", "A", "A", "A"],
+  meta: { filesUploaded: 1, filesParsed: 1, unparsedFiles: [] },
+  examEvidence: catEv
+});
+function fOf(n) { return catAn.flagged.filter(function (x) { return x.number === n; })[0]; }
+ok(fOf(1) && fOf(1).issueCategory === "Possible key error" && fOf(1).severity === "High", "Q1: decisive vote -> Possible key error (High)");
+ok(fOf(2) && fOf(2).issueCategory === "Possible distractor issue" && fOf(2).severity === "Medium", "Q2: strong single distractor -> Possible distractor issue (Medium)");
+ok(fOf(3) && fOf(3).issueCategory === "Possible wording issue", "Q3: scattered votes -> Possible wording issue");
+ok(fOf(3).secondaryCategory === "Possible passage/text dependency", "Q3: linked passage adds passage/text dependency");
+ok(fOf(3).question.indexOf("Which line shows the change?") !== -1, "Q3 quotes its real uploaded stem");
+ok(fOf(4) && fOf(4).issueCategory === "High difficulty / reteaching candidate" && fOf(4).severity === "Low", "Q4: hard but keyed leads -> reteaching candidate (Low)");
+ok(fOf(4).percentCorrect === 40, "Q4 reports percent correct (40%)");
+var f5 = fOf(5);
+ok(f5 && f5.flag === "Missing Response Data" && f5.issueCategory === "Missing or insufficient response data", "Q5: all blank -> Missing Response Data card");
+ok(f5.noData === true && f5.options.length === 0 && f5.percentCorrect === null, "Q5 card has NO answer-choice analysis and no fake rates");
+ok(catAn.flagged.every(function (f) { return f.limitations && f.limitations.length; }), "every card lists what the app can't confidently say");
+ok(fOf(2).limitations.some(function (l) { return /No wording was uploaded/.test(l); }), "textless card's limitations say wording is unavailable");
+ok(fOf(1).immediate !== fOf(3).immediate && fOf(2).immediate !== fOf(4).immediate, "teacher guidance differs by category (deterministic)");
+
+// rendering: dashes for missing data, limitations block, chips
+var card5 = ED.blocks.questionCard(catAn, f5);
+ok(card5.indexOf("—") !== -1 && card5.indexOf('<ul class="opts">') === -1, "missing-data card renders dashes and no option rows");
+ok(card5.indexOf("CAN’T CONFIDENTLY SAY") !== -1, "limitations block renders");
+var card2 = ED.blocks.questionCard(catAn, fOf(2));
+ok(card2.indexOf("flag-cat") !== -1 && card2.indexOf("sev-med") !== -1, "category and severity chips render");
+ok(card2.indexOf("% CORRECT") !== -1, "percent-correct stat renders");
 
 // ---------- result ----------
 if (failures.length) {

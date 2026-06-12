@@ -76,7 +76,7 @@ ED.actions = ED.actions || {};
           '<p class="rhead-sub">' + (an.source === "uploaded"
             ? "In exam order. Each card shows the response data, what the numbers suggest, and what to check before acting. Question text isn’t available from results CSVs."
             : "Grouped by reading passage, in exam order. Each card shows the original question, what went wrong, the action for this week, and the fix for next year’s test bank.") + '</p>' +
-          B.groupedSections(an) +
+          B.groupedSections(an, { aiInteractive: true }) +
 
           // 7. Key Audit Summary
           B.keyAuditSection(an) +

@@ -307,6 +307,33 @@
 .report .fixbox .ropt.win .check { color: var(--r-teal); font-weight: 700; margin-left: 6px; }
 .report .fixbox .rnote { margin-top: 14px; margin-bottom: 0; }
 
+/* ===== AI-assisted feedback (optional layer) ===== */
+
+.report .ai-slot { margin-top: 14px; }
+.report .ai-box {
+  margin-top: 14px;
+  border: 1px solid #d8d2e4; border-left: 4px solid #6b5b8e;
+  border-radius: 0 10px 10px 0;
+  background: #f7f5fb;
+  padding: 14px 16px;
+}
+.report .ai-label {
+  font-family: 'Archivo', sans-serif; font-weight: 800; font-size: 9.5px;
+  letter-spacing: 0.18em; color: #6b5b8e; margin-bottom: 8px;
+}
+.report .ai-line {
+  font-family: 'Archivo', sans-serif; font-size: 12.5px; line-height: 1.6;
+  color: #3d3a4a; margin-bottom: 7px;
+}
+.report .ai-conf {
+  font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
+  color: #6b5b8e; margin-left: 8px;
+}
+.report .ai-actions { font-family: 'Archivo', sans-serif; font-size: 12.5px; color: #3d3a4a; padding-left: 20px; margin-bottom: 7px; }
+.report .ai-actions li { margin-bottom: 3px; }
+.report .ai-rev-opts { list-style: none; padding-left: 12px; font-family: 'Archivo', sans-serif; font-size: 12.5px; color: #3d3a4a; margin-bottom: 7px; }
+.report .ai-muted { font-size: 11.5px; color: #6f6b7d; }
+
 /* ===== Advanced details (collapsed) ===== */
 
 .report details.advanced {

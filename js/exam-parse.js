@@ -209,6 +209,9 @@ window.ED = window.ED || {};
           wordCount: e.passage.wordCount,
           ranges: e.passage.ranges || [],
           file: e.name,
+          // capped excerpt of the REAL uploaded passage text (for AI evidence
+          // packets and teacher reference) — verbatim, never synthesized
+          excerpt: String(e.passage.text || "").replace(/\s+/g, " ").trim().slice(0, 1200),
           linked: false, from: null, to: null, how: ""
         });
       }

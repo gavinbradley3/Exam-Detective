@@ -248,6 +248,19 @@ window.ED = window.ED || {};
         '</details>';
     }
 
+    // Optional AI layer: stored feedback is part of the analysis record and
+    // always renders (incl. exports); the interactive button only appears on
+    // the live Results page for uploaded data. AI never affects the
+    // deterministic content above.
+    if (window.ED && ED.ai && an.source === "uploaded") {
+      var storedAI = an.aiFeedback && an.aiFeedback[f.number];
+      if (storedAI && storedAI.feedback) {
+        html += ED.ai.renderFeedback(storedAI.feedback, storedAI.extractionStatus);
+      } else if (opts.aiInteractive) {
+        html += '<div class="ai-slot no-print" id="ai-slot-' + f.number + '">' + ED.ai.slotIdle(f.number) + '</div>';
+      }
+    }
+
     html += '</div>';
     return html;
   }

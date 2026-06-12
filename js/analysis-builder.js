@@ -586,7 +586,7 @@ window.ED = window.ED || {};
         total: totalQuestions,
         incomplete: evIncompleteInRange,
         passages: ev.passages.map(function (p) {
-          return { title: p.title, file: p.file, linked: p.linked, from: p.from, to: p.to, how: p.how };
+          return { title: p.title, file: p.file, linked: p.linked, from: p.from, to: p.to, how: p.how, excerpt: p.excerpt || "" };
         })
       } : null,
       departmentPattern: {

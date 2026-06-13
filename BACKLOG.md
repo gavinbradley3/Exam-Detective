@@ -33,6 +33,13 @@ Last updated: 2026-06-12. Status legend: ✅ done · 🔶 partial · ⬜ not sta
    or partial, clearly labeled.
 7. ✅ **Docs + manual browser-test checklist** — MANUAL_TEST_CHECKLIST.md.
 
+## Multimodal ingestion pass (2026-06-12) ✅
+Real CID/CMap PDF decoding, classification + adapter architecture,
+SmartMarks/key/questions/readings adapters validated against the four real
+teacher uploads, visual-evidence flags, upload audit. NOT built: OCR,
+vision-model interpretation, page-image rendering/storage (needs a
+rasterizer dependency — flagged honestly in the UI instead).
+
 ## Remaining after this pass
 
 - Real Supabase project wiring + Google OAuth (needs owner credentials;

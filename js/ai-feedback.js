@@ -84,6 +84,9 @@ window.ED = window.ED || {};
       linkedPassage: passage ? { title: passage.title, excerpt: passage.excerpt || null } : null,
       extractionStatus: status,
       evidenceAvailability: f.evidence || "Data only",
+      visualEvidence: f.visualDependency
+        ? { required: true, type: f.visualType || "visual", note: "The visual itself was not machine-readable (no OCR/vision); only this flag is available." }
+        : null,
       knownLimitations: f.limitations || []
     };
   }

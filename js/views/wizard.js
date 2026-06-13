@@ -402,11 +402,15 @@ ED.actions = ED.actions || {};
       statusHtml = '<span class="file-status ok">✓ ' + ex.found + ' question' + (ex.found === 1 ? "" : "s") + ' extracted — ' +
         ex.complete + ' complete' + (ex.incomplete.length ? ', ' + ex.incomplete.length + ' partial (answer choices missing)' : '') +
         (ex.sections.length ? ' · ' + ex.sections.length + ' section marker' + (ex.sections.length === 1 ? "" : "s") + ' found' : '') + '</span>';
+    } else if (f.kind === "readings") {
+      var vis = (f.selections || []).filter(function (sel) { return sel.isVisual || sel.hasImages; }).length;
+      statusHtml = '<span class="file-status ok">✓ Readings booklet — ' + (f.selections || []).length + ' selections with question ranges' +
+        (vis ? ' · ' + vis + ' contain images/comics (visual evidence — not machine-readable, review by eye)' : '') + '</span>';
     } else {
       statusHtml = '<span class="file-status ok">✓ Passage “' + esc(f.passage.title) + '” — ' + f.passage.wordCount + ' words' +
         (f.passage.titleSource === "first line" ? ' (title from the first line)' : ' (title from the file name)') + '</span>';
     }
-    var kindSelect = f.status === "error" ? "" :
+    var kindSelect = (f.status === "error" || f.kind === "readings") ? "" :
       '<label class="small" for="w-examkind-' + i + '">Treat as:</label>' +
       '<select id="w-examkind-' + i + '" data-change="wizard-exam-kind" data-index="' + i + '" aria-label="File type for ' + esc(f.name) + '">' +
         '<option value="exam"' + (f.kind === "exam" ? " selected" : "") + '>Exam questions</option>' +
@@ -833,7 +837,8 @@ ED.actions = ED.actions || {};
           name: f.name, label: res.sections.length === 1 ? res.sections[0].id : "",
           status: "parsed", format: res.format,
           sections: res.sections, parseWarnings: res.warnings,
-          sheetInfo: res.sheetCount ? res.parsedSheets.length + " of " + res.sheetCount + " sheet" + (res.sheetCount === 1 ? "" : "s") + " had results" : ""
+          sheetInfo: res.sheetCount ? res.parsedSheets.length + " of " + res.sheetCount + " sheet" + (res.sheetCount === 1 ? "" : "s") + " had results" : "",
+          pagesRead: res.pagesRead || null, imagesDetected: res.imagesDetected || 0
         });
       } else {
         s.resultFiles.push({ name: f.name, status: "error", statusText: res.error });
@@ -867,7 +872,7 @@ ED.actions = ED.actions || {};
       } else if (ext === "pdf") {
         var preader = new FileReader();
         preader.onload = function () {
-          ED.pdf.extractResults(preader.result, { defaultSection: f.name.replace(/\.[^.]+$/, "") })
+          ED.pdf.extractResults(preader.result, { defaultSection: f.name.replace(/\.[^.]+$/, ""), fileName: f.name })
             .then(function (res) { pushParsed(f, res); done(); });
         };
         preader.onerror = function () {
@@ -898,8 +903,32 @@ ED.actions = ED.actions || {};
   // Classify extracted text as exam questions or a passage. Stored raw
   // text (capped) lets the user re-classify without re-uploading.
   var RAW_TEXT_CAP = 200000;
-  function classifyExamText(text, fileName) {
+  function classifyExamText(text, fileName, extractRes) {
     var entry = { name: fileName, status: "parsed", rawText: String(text).slice(0, RAW_TEXT_CAP) };
+    if (extractRes) { entry.pagesRead = (extractRes.pages || []).length; entry.imagesDetected = extractRes.imageCount || 0; }
+    // adapter dispatch: classify real booklets and cross-route wrong uploads
+    if (ED.ingest) {
+      var cls = ED.ingest.classify(text, fileName);
+      if (cls.type === "questions_booklet") {
+        var qb = ED.ingest.parseQuestionsBooklet(text);
+        if (qb.ok) { entry.kind = "exam"; entry.exam = qb; entry.detectedType = "questions_booklet"; return entry; }
+      }
+      if (cls.type === "readings_booklet" && extractRes) {
+        var rb = ED.ingest.parseReadingsBooklet(extractRes);
+        if (rb.ok) {
+          entry.kind = "readings"; entry.selections = rb.selections;
+          entry.readingsWarnings = rb.warnings; entry.visualPages = rb.visualPages;
+          entry.detectedType = "readings_booklet";
+          return entry;
+        }
+      }
+      if (cls.type === "student_results") {
+        return { name: fileName, status: "error", kind: "unreadable", statusText: "This PDF is a class RESULTS report (item analysis), not exam text. Upload it in Step 2 — Class Results — instead." };
+      }
+      if (cls.type === "answer_key") {
+        return { name: fileName, status: "error", kind: "unreadable", statusText: "This PDF is an ANSWER KEY, not exam text. Upload it in Step 4 — Answer Key — instead." };
+      }
+    }
     var exam = ED.examText.parseExamText(entry.rawText);
     if (exam.isExam) {
       entry.kind = "exam";
@@ -925,7 +954,7 @@ ED.actions = ED.actions || {};
         var reader = new FileReader();
         reader.onload = function () {
           ED.pdf.extractText(reader.result).then(function (res) {
-            if (res.ok) s.examFiles.push(classifyExamText(res.text, f.name));
+            if (res.ok) s.examFiles.push(classifyExamText(res.text, f.name, res));
             else s.examFiles.push({ name: f.name, status: "error", kind: "unreadable", statusText: res.error });
             done();
           });
@@ -1103,7 +1132,37 @@ ED.actions = ED.actions || {};
       var meta = uploadMeta(s);
       meta.analysisId = s.analysisId; // ties the results to this wizard session
       var enteredCount = keyEntered(s);
+      // upload/readability audit: provenance for every file in this analysis
+      var uploadAudit = [];
+      (s.resultFiles || []).forEach(function (rf) {
+        var students = (rf.sections || []).reduce(function (a, sec) { return a + (sec.responses || 0); }, 0);
+        uploadAudit.push({
+          name: rf.name,
+          type: rf.status === "parsed" ? (rf.format || "results") : "unknown_or_failed",
+          pages: rf.pagesRead || null, images: rf.imagesDetected || 0,
+          extracted: rf.status === "parsed" ? students + " students · " + (rf.sections || []).reduce(function (m, sec) { return Math.max(m, sec.questionCount); }, 0) + " questions" : "nothing",
+          warnings: (rf.parseWarnings || []).length + (rf.status === "parsed" ? 0 : 1),
+          safe: rf.status === "parsed",
+          note: rf.status === "parsed" ? "" : (rf.statusText || "")
+        });
+      });
+      (s.examFiles || []).forEach(function (ef) {
+        var extracted = "nothing";
+        if (ef.kind === "exam" && ef.exam) extracted = ef.exam.found + " questions (" + ef.exam.complete + " complete)";
+        if (ef.kind === "readings" && ef.selections) extracted = ef.selections.length + " reading selections";
+        if (ef.kind === "passage" && ef.passage) extracted = "passage “" + ef.passage.title + "”";
+        uploadAudit.push({
+          name: ef.name,
+          type: ef.detectedType || (ef.kind === "unreadable" ? "unknown_or_failed" : ef.kind),
+          pages: ef.pagesRead || null, images: ef.imagesDetected || 0,
+          extracted: extracted,
+          warnings: ((ef.exam && ef.exam.warnings) || ef.readingsWarnings || []).length + (ef.status === "parsed" ? 0 : 1),
+          safe: ef.status === "parsed",
+          note: ef.status === "parsed" ? "" : (ef.statusText || "")
+        });
+      });
       var analysis = ED.builder.build({
+        uploadAudit: uploadAudit,
         setup: s.setup,
         sections: secs,
         key: key.some(function (L) { return L; }) ? key : null,

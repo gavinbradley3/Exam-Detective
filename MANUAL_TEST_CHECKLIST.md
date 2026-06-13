@@ -34,6 +34,15 @@ open http://localhost:8000. Fixtures live in `scripts/fixtures/`.
       List, "Data only", "no question text uploaded". No demo numbers (129/
       Strange Orchid) anywhere.
 
+## 2b. Real-exam flow (scripts/fixtures/real/)
+
+- [ ] Step 2 → `8C_2026.pdf` → "✓ Parsed — 26 students, 75 questions (PDF · SmartMarks item analysis)".
+- [ ] Step 3 → `questions_booklet.pdf` (75 questions, 11 sections) + `readings_booklet.pdf` (11 selections, image pages flagged).
+- [ ] Step 4 → `answer_key_grade8.pdf` → 75 entries.
+- [ ] Step 5 shows the Q33 key mismatch warning (key says B, report says D).
+- [ ] Run → Results: 26 students, Q33 Possible Key Error, Q70–75 visual-evidence chips, Upload & Readability Audit table, key provenance line.
+- [ ] Wrong-slot test: upload the key PDF in Step 2 → routed to Step 4 with a specific message.
+
 ## 3. Real files (the fixtures are self-generated — these matter most)
 
 - [ ] A real Excel or Google-Sheets exported .xlsx of class results.

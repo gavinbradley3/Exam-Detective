@@ -81,6 +81,9 @@ ED.actions = ED.actions || {};
           // 7. Key Audit Summary
           B.keyAuditSection(an) +
 
+          // 7b. Upload & readability audit (uploaded data only)
+          B.uploadAuditSection(an) +
+
           // 8. Department Pattern Summary
           B.departmentPatternSection(an) +
 

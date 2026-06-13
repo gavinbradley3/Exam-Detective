@@ -36,51 +36,212 @@ window.ED = window.ED || {};
     });
   }
 
-  // ---------- locate stream objects ----------
+  // ---------- document model: objects, fonts, CMaps, pages ----------
+  // Real-world PDFs (Google Docs, Word, SMART editors) embed subset fonts
+  // with 2-byte CID encodings and hex strings. Reading them requires the
+  // per-font ToUnicode CMaps — without this, extraction yields nothing.
+  // This model also surfaces per-page text and embedded-image detection
+  // for the readability audit and visual-evidence flags.
 
-  // Find every `<<dict>> stream ... endstream` in the raw bytes.
-  function findStreams(raw) {
-    var src = latin1.decode(raw);
-    var streams = [];
-    var idx = 0;
+  function buildObjects(raw, src) {
+    // Sequential walk that always jumps over stream bodies — compressed
+    // stream bytes can contain "N 0 obj"-lookalikes that would otherwise
+    // derail the scan past real objects (fonts, pages).
+    var objs = {};
+    var pos = 0;
+    var re = /(\d+)\s+0\s+obj\b/g;
     while (true) {
-      var s = src.indexOf("stream", idx);
-      if (s === -1) break;
-      // must be the keyword, not part of "endstream"
-      if (src.slice(s - 3, s) === "end") { idx = s + 6; continue; }
-
-      // walk back to the matching `<<` of the dictionary before `stream`
-      var dictEnd = src.lastIndexOf(">>", s);
-      var depth = 1, dStart = -1;
-      for (var i = dictEnd - 1; i >= 0 && i > dictEnd - 4000; i--) {
-        if (src[i] === ">" && src[i - 1] === ">") { depth++; i--; }
-        else if (src[i] === "<" && src[i - 1] === "<") {
-          depth--;
-          if (depth === 0) { dStart = i - 1; break; }
-          i--;
-        }
+      re.lastIndex = pos;
+      var m = re.exec(src);
+      if (!m) break;
+      var num = +m[1];
+      var start = re.lastIndex;
+      var sIdx = src.indexOf("stream", start);
+      var eIdx = src.indexOf("endobj", start);
+      if (eIdx === -1) break;
+      if (sIdx !== -1 && sIdx < eIdx) {
+        var dict = src.slice(start, sIdx);
+        var ds = sIdx + 6;
+        if (src[ds] === "\r") ds++;
+        if (src[ds] === "\n") ds++;
+        var de = src.indexOf("endstream", ds);
+        if (de === -1) break;
+        var dataEnd = de;
+        while (dataEnd > ds && (src[dataEnd - 1] === "\n" || src[dataEnd - 1] === "\r")) dataEnd--;
+        objs[num] = { dict: dict, stream: raw.subarray(ds, dataEnd) };
+        var e2 = src.indexOf("endobj", de);
+        pos = e2 === -1 ? de + 9 : e2 + 6;
+      } else {
+        objs[num] = { dict: src.slice(start, eIdx), stream: null };
+        pos = eIdx + 6;
       }
-      var dict = dStart >= 0 ? src.slice(dStart, dictEnd + 2) : "";
-
-      // stream data starts after the EOL following `stream`
-      var dataStart = s + 6;
-      if (src[dataStart] === "\r") dataStart++;
-      if (src[dataStart] === "\n") dataStart++;
-      var end = src.indexOf("endstream", dataStart);
-      if (end === -1) break;
-      var dataEnd = end;
-      while (dataEnd > dataStart && (src[dataEnd - 1] === "\n" || src[dataEnd - 1] === "\r")) dataEnd--;
-
-      streams.push({ dict: dict, data: raw.subarray(dataStart, dataEnd) });
-      idx = end + 9;
     }
-    return streams;
+    return objs;
   }
 
-  // ---------- text operators -> text ----------
+  function getStream(objs, num) {
+    var o = objs[num];
+    if (!o || !o.stream) return Promise.resolve(null);
+    if (/\/FlateDecode/.test(o.dict)) {
+      return inflateZlib(o.stream).catch(function (e) {
+        if (e && e.message === "no-decompressor") throw e;
+        return null;
+      });
+    }
+    if (/\/Filter/.test(o.dict)) return Promise.resolve(null); // unsupported filter
+    return Promise.resolve(o.stream);
+  }
+
+  // PDF 1.5 object streams hold non-stream objects (incl. font dicts).
+  function expandObjectStreams(objs) {
+    var chain = Promise.resolve();
+    Object.keys(objs).forEach(function (numStr) {
+      var o = objs[numStr];
+      if (!/\/Type\s*\/ObjStm\b/.test(o.dict)) return;
+      chain = chain.then(function () {
+        return getStream(objs, +numStr).then(function (data) {
+          if (!data) return;
+          var txt = latin1.decode(data);
+          var firstM = o.dict.match(/\/First\s+(\d+)/);
+          var nM = o.dict.match(/\/N\s+(\d+)/);
+          if (!firstM || !nM) return;
+          var first = +firstM[1], n = +nM[1];
+          var pairs = txt.slice(0, first).trim().split(/\s+/).map(Number);
+          for (var i = 0; i < n; i++) {
+            var num = pairs[2 * i], off = pairs[2 * i + 1];
+            if (isNaN(num) || isNaN(off)) continue;
+            var endOff = (i + 1 < n && !isNaN(pairs[2 * i + 3])) ? first + pairs[2 * i + 3] : txt.length;
+            if (!objs[num]) objs[num] = { dict: txt.slice(first + off, endOff), stream: null };
+          }
+        });
+      });
+    });
+    return chain.then(function () { return objs; });
+  }
+
+  function hexToStr(h) {
+    var s = "";
+    for (var i = 0; i + 4 <= h.length; i += 4) s += String.fromCharCode(parseInt(h.substr(i, 4), 16));
+    if (h.length % 4 === 2) s += String.fromCharCode(parseInt(h.substr(h.length - 2, 2), 16));
+    return s;
+  }
+
+  // hex string -> one char per BYTE (CMap pairing happens in mapBytes)
+  function hexToByteStr(h) {
+    var s = "";
+    for (var i = 0; i + 2 <= h.length; i += 2) s += String.fromCharCode(parseInt(h.substr(i, 2), 16));
+    return s;
+  }
+
+  function parseCMap(txt) {
+    var map = {};
+    var width = 2;
+    var cs = txt.match(/begincodespacerange\s*<([0-9A-Fa-f]+)>/);
+    if (cs) width = Math.max(1, Math.round(cs[1].length / 2));
+    var m, p;
+    var bc = /beginbfchar([\s\S]*?)endbfchar/g;
+    while ((m = bc.exec(txt))) {
+      var pairRe = /<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/g;
+      while ((p = pairRe.exec(m[1]))) map[parseInt(p[1], 16)] = hexToStr(p[2]);
+    }
+    var br = /beginbfrange([\s\S]*?)endbfrange/g;
+    while ((m = br.exec(txt))) {
+      var rRe = /<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(?:<([0-9A-Fa-f]+)>|\[((?:\s*<[0-9A-Fa-f]+>)+)\s*\])/g;
+      while ((p = rRe.exec(m[1]))) {
+        var lo = parseInt(p[1], 16), hi = parseInt(p[2], 16);
+        if (hi - lo > 65535) continue;
+        if (p[3]) {
+          var dst = hexToStr(p[3]);
+          for (var c = lo; c <= hi; c++) {
+            var last = dst.charCodeAt(dst.length - 1) + (c - lo);
+            map[c] = dst.slice(0, -1) + String.fromCharCode(last);
+          }
+        } else if (p[4]) {
+          var items = p[4].match(/<([0-9A-Fa-f]+)>/g) || [];
+          for (var k = 0; k < items.length && lo + k <= hi; k++) {
+            map[lo + k] = hexToStr(items[k].replace(/[<>]/g, ""));
+          }
+        }
+      }
+    }
+    return { map: map, width: width };
+  }
+
+  // -> Promise<doc model: { objs, fontByName, cmapByObj, xobjImageNames, pages }>
+  function buildDocModel(raw) {
+    var src = latin1.decode(raw);
+    var objs = buildObjects(raw, src);
+    return expandObjectStreams(objs).then(function () {
+      // font CMaps
+      var cmapByObj = {};
+      var chain = Promise.resolve();
+      Object.keys(objs).forEach(function (numStr) {
+        var tu = objs[numStr].dict.match(/\/ToUnicode\s+(\d+)\s+0\s+R/);
+        if (!tu) return;
+        chain = chain.then(function () {
+          return getStream(objs, +tu[1]).then(function (data) {
+            if (data) cmapByObj[numStr] = parseCMap(latin1.decode(data));
+          });
+        });
+      });
+      return chain.then(function () {
+        // resource-name -> font object (document-wide; generated PDFs use
+        // stable names; conflicts fall back to "no cmap" + honesty gate)
+        var fontByName = {};
+        var imageObjs = {};
+        Object.keys(objs).forEach(function (numStr) {
+          if (/\/Subtype\s*\/Image\b/.test(objs[numStr].dict)) imageObjs[numStr] = true;
+        });
+        var xobjImageNames = {};
+        Object.keys(objs).forEach(function (numStr) {
+          var d = objs[numStr].dict;
+          var fm = /\/Font\s*<<([\s\S]*?)>>/g, fdict;
+          while ((fdict = fm.exec(d))) {
+            var pr = /\/([A-Za-z0-9.#+\-]+)\s+(\d+)\s+0\s+R/g, pp;
+            while ((pp = pr.exec(fdict[1]))) fontByName[pp[1]] = pp[2];
+          }
+          var fr = d.match(/\/Font\s+(\d+)\s+0\s+R/);
+          if (fr && objs[fr[1]]) {
+            var pr2 = /\/([A-Za-z0-9.#+\-]+)\s+(\d+)\s+0\s+R/g, pp2;
+            while ((pp2 = pr2.exec(objs[fr[1]].dict))) fontByName[pp2[1]] = pp2[2];
+          }
+          var xm = /\/XObject\s*<<([\s\S]*?)>>/g, xdict;
+          while ((xdict = xm.exec(d))) {
+            var xr = /\/([A-Za-z0-9.#+\-]+)\s+(\d+)\s+0\s+R/g, xp;
+            while ((xp = xr.exec(xdict[1]))) {
+              if (imageObjs[xp[2]]) xobjImageNames[xp[1]] = true;
+            }
+          }
+        });
+        // pages in document order
+        var pages = [];
+        Object.keys(objs).map(Number).sort(function (a, b) { return a - b; }).forEach(function (num) {
+          var d = objs[num].dict;
+          if (!/\/Type\s*\/Page\b/.test(d) || /\/Type\s*\/Pages\b/.test(d)) return;
+          var contents = [];
+          var c1 = d.match(/\/Contents\s+(\d+)\s+0\s+R/);
+          if (c1) contents.push(+c1[1]);
+          var c2 = d.match(/\/Contents\s*\[([^\]]*)\]/);
+          if (c2) {
+            var cr = /(\d+)\s+0\s+R/g, cp;
+            while ((cp = cr.exec(c2[1]))) contents.push(+cp[1]);
+          }
+          if (contents.length) pages.push({ contents: contents });
+        });
+        return {
+          objs: objs, fontByName: fontByName, cmapByObj: cmapByObj,
+          xobjImageNames: xobjImageNames, pages: pages,
+          imageCount: Object.keys(imageObjs).length
+        };
+      });
+    });
+  }
+
+  // ---------- text operators -> text (CID-aware) ----------
 
   function decodePdfString(s) {
-    // contents of a ( ) string, with backslash escapes and octal codes
+    // contents of a ( ) string, with backslash escapes and octal codes;
+    // returns one char per BYTE (mapped through the font CMap by callers)
     var out = "";
     for (var i = 0; i < s.length; i++) {
       var c = s[i];
@@ -99,42 +260,75 @@ window.ED = window.ED || {};
     return out;
   }
 
-  // Pull readable text from one decompressed content stream.
-  function textFromContent(content) {
-    var src = latin1.decode(content);
-    if (!/\b(BT|Tj|TJ)\b/.test(src)) return null; // not a text stream
-
+  function mapBytes(byteStr, cmap, stats) {
+    if (!cmap) { stats.plain += byteStr.length; return byteStr; }
     var out = "";
-    var re = /\(((?:[^()\\]|\\.)*)\)\s*(Tj|'|")|\[((?:[^\]\\]|\\.)*?)\]\s*TJ|(T\*|TD|Td|ET)/g;
+    var w = cmap.width;
+    for (var i = 0; i + w <= byteStr.length; i += w) {
+      var code = 0;
+      for (var k = 0; k < w; k++) code = (code << 8) | byteStr.charCodeAt(i + k);
+      var ch = cmap.map[code];
+      if (ch !== undefined) { out += ch; stats.mapped++; }
+      else stats.unmapped++;
+    }
+    return out;
+  }
+
+  // Pull readable text from one decompressed content stream.
+  function textFromContent(content, model, pageInfo) {
+    var src = latin1.decode(content);
+    if (!/\b(BT|Tj|TJ)\b/.test(src)) {
+      if (pageInfo && /\bDo\b/.test(src)) pageInfo.hasImage = true;
+      return null;
+    }
+    var out = "";
+    var cmap = null;
+    var stats = { mapped: 0, unmapped: 0, plain: 0 };
+    var re = /\/([A-Za-z0-9.#+\-]+)\s+[\d.]+\s+Tf|\(((?:[^()\\]|\\.)*)\)\s*(Tj|'|")|<([0-9A-Fa-f\s]*)>\s*(Tj|'|")|\[((?:[^\]\\]|\\.|\([^)]*\))*?)\]\s*TJ|\/([A-Za-z0-9.#+\-]+)\s+Do\b|(-?[\d.]+)\s+(-?[\d.]+)\s+(?:Td|TD)\b|(T\*|ET)/g;
     var m;
     while ((m = re.exec(src))) {
-      if (m[2]) {                       // (string) Tj | ' | "
-        out += decodePdfString(m[1]);
-        out += " ";
-      } else if (m[3] !== undefined) {  // [ ... ] TJ
-        var inner = m[3];
-        var sRe = /\(((?:[^()\\]|\\.)*)\)/g;
-        var sm;
-        while ((sm = sRe.exec(inner))) out += decodePdfString(sm[1]);
-        out += " ";
-      } else {                          // positioning -> line break
+      if (m[1] !== undefined) {                 // /F1 12 Tf — font switch
+        var objNum = model ? model.fontByName[m[1]] : null;
+        cmap = objNum && model.cmapByObj[objNum] ? model.cmapByObj[objNum] : null;
+      } else if (m[2] !== undefined) {          // (string) Tj | ' | "
+        out += mapBytes(decodePdfString(m[2]), cmap, stats);
+      } else if (m[4] !== undefined) {          // <hex> Tj
+        out += mapBytes(hexToByteStr(m[4].replace(/\s+/g, "")), cmap, stats);
+      } else if (m[6] !== undefined) {          // [ ... ] TJ
+        var inner = m[6];
+        var sRe = /\(((?:[^()\\]|\\.)*)\)|<([0-9A-Fa-f\s]*)>|(-?[\d.]+)/g, sm;
+        while ((sm = sRe.exec(inner))) {
+          if (sm[1] !== undefined) out += mapBytes(decodePdfString(sm[1]), cmap, stats);
+          else if (sm[2] !== undefined) out += mapBytes(hexToByteStr(sm[2].replace(/\s+/g, "")), cmap, stats);
+          else if (parseFloat(sm[3]) < -150) out += " "; // big kern gap = word space
+        }
+      } else if (m[7] !== undefined) {          // /Im1 Do — XObject draw
+        if (pageInfo && model && model.xobjImageNames[m[7]]) pageInfo.hasImage = true;
+      } else if (m[8] !== undefined) {          // tx ty Td/TD
+        if (Math.abs(parseFloat(m[9])) > 0.5) out += "\n"; // real line move
+      } else {                                  // T* | ET — line/block end
         out += "\n";
       }
+    }
+    if (pageInfo) {
+      pageInfo.mapped = (pageInfo.mapped || 0) + stats.mapped;
+      pageInfo.unmapped = (pageInfo.unmapped || 0) + stats.unmapped;
     }
     return out;
   }
 
   function printableRatio(text) {
-    if (!text.length) return 0;
-    var good = 0;
+    // judged over actual content — whitespace doesn't count as evidence
+    var visible = 0, good = 0;
     for (var i = 0; i < text.length; i++) {
       var c = text.charCodeAt(i);
-      if ((c >= 32 && c < 127) || c === 10 || c === 13 || c === 9) good++;
+      if (c === 32 || c === 10 || c === 13 || c === 9) continue;
+      visible++;
+      if ((c >= 33 && c < 127) || (c >= 0x00C0 && c <= 0x024F) ||
+          (c >= 0x2010 && c <= 0x2027) || c === 0x2122 || c === 0x00A9) good++;
     }
-    return good / text.length;
+    return { visible: visible, ratio: visible ? good / visible : 0 };
   }
-
-  // ---------- public: extract all text ----------
 
   var ERRORS = {
     "no-decompressor": "This browser can’t decompress PDF streams. Use a current version of Chrome, Edge, Firefox, or Safari.",
@@ -144,55 +338,69 @@ window.ED = window.ED || {};
     empty: "We couldn’t find any readable text in this PDF."
   };
 
-  // -> Promise<{ ok, text, kind: "text"|"scanned"|"encoded"|"empty", error }>
+  // -> Promise<{ ok, text, kind, pages:[{page,text,hasImage,mapped,unmapped}],
+  //              imageCount, visualPages:[n], unmappedShare, error }>
   function extractText(buffer) {
     var raw = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-    var head = latin1.decode(raw.subarray(0, 8));
-    if (head.indexOf("%PDF") !== 0) {
+    var head = latin1.decode(raw.subarray(0, 1024));
+    if (head.indexOf("%PDF") === -1) {
       return Promise.resolve({ ok: false, kind: "empty", error: ERRORS["not-a-pdf"] });
     }
-
-    var streams = findStreams(raw);
-    var imageStreams = 0;
-    var texts = [];
-    var chain = Promise.resolve();
-
-    streams.forEach(function (st) {
-      chain = chain.then(function () {
-        if (/\/Subtype\s*\/Image|\/DCTDecode|\/JPXDecode|\/CCITTFaxDecode/.test(st.dict)) {
-          imageStreams++;
-          return;
-        }
-        if (/\/FontFile/.test(st.dict)) return; // embedded font programs
-        var bytesP;
-        if (/\/FlateDecode/.test(st.dict)) {
-          bytesP = inflateZlib(st.data).catch(function (e) {
-            if (e && e.message === "no-decompressor") throw e;
-            return null; // corrupt single stream: skip it
+    return buildDocModel(raw).then(function (model) {
+      var pageResults = [];
+      var chain = Promise.resolve();
+      if (model.pages.length) {
+        model.pages.forEach(function (pg, idx) {
+          chain = chain.then(function () {
+            var info = { page: idx + 1, text: "", hasImage: false, mapped: 0, unmapped: 0 };
+            var inner = Promise.resolve();
+            pg.contents.forEach(function (cnum) {
+              inner = inner.then(function () {
+                return getStream(model.objs, cnum).then(function (bytes) {
+                  if (!bytes) return;
+                  var t = textFromContent(bytes, model, info);
+                  if (t !== null) info.text += t;
+                });
+              });
+            });
+            return inner.then(function () { pageResults.push(info); });
           });
-        } else if (/\/Filter/.test(st.dict)) {
-          return; // other filters (LZW, ASCII85…) not supported — skip
-        } else {
-          bytesP = Promise.resolve(st.data);
-        }
-        return bytesP.then(function (bytes) {
-          if (!bytes) return;
-          var t = textFromContent(bytes);
-          if (t !== null) texts.push(t);
         });
+      } else {
+        // no page tree found — treat each plausible stream as a page
+        Object.keys(model.objs).forEach(function (numStr) {
+          var o = model.objs[numStr];
+          if (!o.stream) return;
+          if (/\/Subtype\s*\/Image|\/FontFile|\/Type\s*\/ObjStm|CMap/.test(o.dict)) return;
+          chain = chain.then(function () {
+            return getStream(model.objs, +numStr).then(function (bytes) {
+              if (!bytes) return;
+              var info = { page: pageResults.length + 1, text: "", hasImage: false, mapped: 0, unmapped: 0 };
+              var t = textFromContent(bytes, model, info);
+              if (t !== null) { info.text = t; pageResults.push(info); }
+            });
+          });
+        });
+      }
+      return chain.then(function () {
+        var text = pageResults.map(function (p) { return p.text; }).join("\n");
+        var pr = printableRatio(text);
+        var totalMapped = 0, totalUnmapped = 0;
+        pageResults.forEach(function (p) { totalMapped += p.mapped; totalUnmapped += p.unmapped; });
+        if (pr.visible < 40) {
+          if (model.imageCount > 0) return { ok: false, kind: "scanned", error: ERRORS.scanned, pages: pageResults, imageCount: model.imageCount };
+          return { ok: false, kind: "empty", error: ERRORS.empty, pages: pageResults, imageCount: 0 };
+        }
+        if (pr.ratio < 0.7) {
+          return { ok: false, kind: "encoded", error: ERRORS.encoded, pages: pageResults, imageCount: model.imageCount };
+        }
+        var visualPages = pageResults.filter(function (p) { return p.hasImage; }).map(function (p) { return p.page; });
+        return {
+          ok: true, kind: "text", text: text,
+          pages: pageResults, imageCount: model.imageCount, visualPages: visualPages,
+          unmappedShare: (totalMapped + totalUnmapped) ? totalUnmapped / (totalMapped + totalUnmapped) : 0
+        };
       });
-    });
-
-    return chain.then(function () {
-      if (!texts.length) {
-        if (imageStreams > 0) return { ok: false, kind: "scanned", error: ERRORS.scanned };
-        return { ok: false, kind: "empty", error: ERRORS.empty };
-      }
-      var text = texts.join("\n");
-      if (printableRatio(text) < 0.7) {
-        return { ok: false, kind: "encoded", error: ERRORS.encoded };
-      }
-      return { ok: true, kind: "text", text: text };
     }).catch(function (e) {
       return { ok: false, kind: "empty", error: e && e.message === "no-decompressor" ? ERRORS["no-decompressor"] : ERRORS["not-a-pdf"] };
     });
@@ -252,6 +460,14 @@ window.ED = window.ED || {};
         if (res.kind === "scanned") res.error = "The answer key appears to be scanned or image-only. " + ERRORS.scanned + " Upload a text-based PDF, CSV, or XLSX answer key — or paste the key instead.";
         else if (res.kind === "encoded" || res.kind === "empty") res.error += " Copy the key out of the document and use the paste box instead.";
         return res;
+      }
+      // classify FIRST: a results report or booklet contains stray
+      // number-letter pairs that could masquerade as a key
+      if (window.ED && ED.ingest) {
+        var cls = ED.ingest.classify(res.text);
+        if (cls.type === "student_results") return { ok: false, error: "This PDF is a class RESULTS report (item analysis), not an answer key. Upload it in Step 2 — and upload the key document here instead." };
+        if (cls.type === "questions_booklet") return { ok: false, error: "This PDF is the QUESTIONS BOOKLET, not an answer key. Upload it in Step 3 — and upload the key document here instead." };
+        if (cls.type === "readings_booklet") return { ok: false, error: "This PDF is the READINGS BOOKLET, not an answer key. Upload it in Step 3 — and upload the key document here instead." };
       }
       var keyRes = keyFromText(res.text);
       if (!keyRes.ok) {
@@ -393,7 +609,27 @@ window.ED = window.ED || {};
         if (res.kind === "scanned") res.error = ERRORS.scanned + " Export the report as CSV or XLSX from your assessment tool, or upload a text-based PDF.";
         return res;
       }
-      return resultsFromText(res.text, opts);
+      // adapter dispatch: SmartMarks/Assessment-Analysis block reports first
+      if (window.ED && ED.ingest) {
+        var cls = ED.ingest.classify(res.text, opts && opts.fileName);
+        if (cls.type === "student_results") {
+          var sm = ED.ingest.parseSmartMarks(res, opts);
+          sm.pagesRead = res.pages.length; sm.imagesDetected = res.imageCount; sm.visualPages = res.visualPages;
+          if (sm.ok || /parser bug/.test(sm.error || "")) return sm;
+        }
+        if (cls.type === "questions_booklet") {
+          return { ok: false, error: "This PDF is the QUESTIONS BOOKLET, not a results report. Upload it in Step 3 — and upload the class results report here instead." };
+        }
+        if (cls.type === "readings_booklet") {
+          return { ok: false, error: "This PDF is the READINGS BOOKLET, not a results report. Upload it in Step 3 — and upload the class results report here instead." };
+        }
+        if (cls.type === "answer_key") {
+          return { ok: false, error: "This PDF looks like an ANSWER KEY (question→answer pairs, no result percentages), not a results report. Upload it in Step 4 — Answer Key — and upload the class results report here instead." };
+        }
+      }
+      var generic = resultsFromText(res.text, opts);
+      generic.pagesRead = res.pages.length; generic.imagesDetected = res.imageCount; generic.visualPages = res.visualPages;
+      return generic;
     });
   }
 

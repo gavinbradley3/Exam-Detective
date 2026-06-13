@@ -201,9 +201,22 @@ window.ED = window.ED || {};
   function parseExamPDF(buffer) {
     return ED.pdf.extractText(buffer).then(function (res) {
       if (!res.ok) return res; // honest scanned/encoded/empty refusal from pdf-extract
+      // adapter dispatch: real questions booklets (flowed, a/b/c/d options)
+      if (ED.ingest) {
+        var cls = ED.ingest.classify(res.text);
+        if (cls.type === "questions_booklet") {
+          var qb = ED.ingest.parseQuestionsBooklet(res.text);
+          if (qb.ok) { qb.pagesRead = res.pages.length; qb.imagesDetected = res.imageCount; return qb; }
+        }
+        if (cls.type === "readings_booklet") {
+          var rb = ED.ingest.parseReadingsBooklet(res);
+          if (rb.ok) { rb.isExam = false; rb.isReadings = true; rb.pagesRead = res.pages.length; rb.imagesDetected = res.imageCount; return rb; }
+        }
+      }
       var parsed = parseExamText(res.text);
       parsed.ok = true;
       parsed.kind = "text";
+      parsed.pagesRead = res.pages.length; parsed.imagesDetected = res.imageCount;
       return parsed;
     });
   }
@@ -234,6 +247,25 @@ window.ED = window.ED || {};
     var warnings = [];
 
     entries.forEach(function (e) {
+      // multi-selection readings booklets: one passage per selection,
+      // linked by the explicit question ranges in the booklet itself
+      if (e.kind === "readings" && e.selections) {
+        e.selections.forEach(function (sel) {
+          passages.push({
+            title: sel.title,
+            titleSource: "booklet header",
+            wordCount: sel.wordCount,
+            ranges: [{ from: sel.from, to: sel.to }],
+            file: e.name,
+            excerpt: sel.excerpt || "",
+            visualPages: sel.visualPages || [],
+            isVisual: !!sel.isVisual,
+            genre: sel.genre || "",
+            linked: false, from: null, to: null, how: ""
+          });
+        });
+        return;
+      }
       if (e.kind === "exam" && e.exam) {
         Object.keys(e.exam.questions).forEach(function (n) {
           if (!questions[n]) questions[n] = e.exam.questions[n]; // first file wins; duplicates warned below

@@ -330,6 +330,26 @@ window.ED = window.ED || {};
     return html;
   }
 
+  // ----- Upload / readability audit (uploaded data) -----
+  function uploadAuditSection(an) {
+    if (!an.uploadAudit || !an.uploadAudit.length) return "";
+    var rows = an.uploadAudit.map(function (u) {
+      return '<tr><td class="qn">' + A().esc(u.name) + '</td>' +
+        '<td>' + A().esc(u.type) + '</td>' +
+        '<td>' + (u.pages || "—") + '</td>' +
+        '<td>' + (u.images || 0) + '</td>' +
+        '<td>' + A().esc(u.extracted) + (u.note ? ' — ' + A().esc(u.note) : '') + '</td>' +
+        '<td>' + (u.safe ? "✓ used" : "✕ not used") + (u.warnings ? " · " + u.warnings + " warning" + (u.warnings === 1 ? "" : "s") : "") + '</td></tr>';
+    }).join("");
+    var anyImages = an.uploadAudit.some(function (u) { return u.images > 0; });
+    return '<div class="rhead">Upload &amp; Readability Audit</div>' +
+      '<p class="rhead-sub">What was read from each uploaded file, and whether it was safe to use in this analysis. Extraction method: text (no OCR or vision model in this build' +
+      (anyImages ? ' — pages with embedded images are flagged as visual evidence for review by eye' : '') + ').</p>' +
+      '<div class="ptable-wrap"><table class="ptable">' +
+      '<thead><tr><th scope="col">File</th><th scope="col">Detected As</th><th scope="col">Pages</th><th scope="col">Images</th><th scope="col">Extracted</th><th scope="col">Status</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table></div>';
+  }
+
   // ----- Department Pattern Summary -----
   function departmentPatternSection(an) {
     var dp = an.departmentPattern;
@@ -375,6 +395,7 @@ window.ED = window.ED || {};
     questionCard: questionCard,
     groupedSections: groupedSections,
     keyAuditSection: keyAuditSection,
+    uploadAuditSection: uploadAuditSection,
     departmentPatternSection: departmentPatternSection,
     takeawayPanel: takeawayPanel,
     footerCap: footerCap

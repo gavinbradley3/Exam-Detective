@@ -96,6 +96,7 @@ window.ED = window.ED || {};
     var sections = input.sections || [];
     var key = input.key && input.key.length ? input.key : null;
     var meta = input.meta || { filesUploaded: 0, filesParsed: 0, unparsedFiles: [] };
+    var uploadAudit = input.uploadAudit || null;
     var ev = input.examEvidence && input.examEvidence.coverage && input.examEvidence.coverage.withText
       ? input.examEvidence : null;
     var esc = ED.analysis.esc;
@@ -425,6 +426,12 @@ window.ED = window.ED || {};
           if (!qt.complete) {
             f.problem += " <b>Only part of this question could be extracted</b> (the answer-choice text is missing), so check the original document.";
           }
+          if (qt.visualDependency) {
+            f.visualDependency = true;
+            f.visualType = qt.visualType || "visual";
+            if (!f.secondaryCategory) f.secondaryCategory = "Visual evidence required";
+            f.problem += " <b>This question depends on a " + esc(f.visualType) + ".</b> The visual itself isn’t machine-readable in this build (no OCR or vision model), so review it by eye before acting.";
+          }
         } else {
           f.question = "Question " + q + " <span style=\"font-weight:400;font-size:13px;color:#6a776f;\">(no question text uploaded — flagged from the response data alone)</span>";
           f.evidence = fileKeyConflict ? "Key conflict in files" : "Data only";
@@ -442,6 +449,7 @@ window.ED = window.ED || {};
         }) : [];
         // ---- what the app can't confidently say (per-card honesty) ----
         var lims = [];
+        if (qt && qt.visualDependency) lims.push("The " + (qt.visualType || "visual") + " this question depends on isn’t machine-readable here — visual evidence requires teacher review (no OCR/vision in this build).");
         if (!qt) lims.push("No wording was uploaded for this question, so wording and choice-level review can’t happen here.");
         else if (!qt.complete) lims.push("Extraction was partial (answer-choice text is missing), so choice-level review needs the original document.");
         if (qt && !grp.passage) lims.push("No reading passage is linked to this question, so passage support can’t be checked.");
@@ -584,12 +592,13 @@ window.ED = window.ED || {};
       // which answer key produced these results (file, coverage, caveats) —
       // shown in the Key Audit Summary so reports state their key source
       keyProvenance: input.keyInfo || null,
+      uploadAudit: uploadAudit,
       evidenceSummary: ev ? {
         withText: evInRange,
         total: totalQuestions,
         incomplete: evIncompleteInRange,
         passages: ev.passages.map(function (p) {
-          return { title: p.title, file: p.file, linked: p.linked, from: p.from, to: p.to, how: p.how, excerpt: p.excerpt || "" };
+          return { title: p.title, file: p.file, linked: p.linked, from: p.from, to: p.to, how: p.how, excerpt: p.excerpt || "", isVisual: !!p.isVisual, genre: p.genre || "", visualPages: p.visualPages || [] };
         })
       } : null,
       departmentPattern: {

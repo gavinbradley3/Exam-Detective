@@ -1,6 +1,36 @@
 # Build Notes
 
-Last updated: 2026-06-12 (upload-pipeline repair: result-PDF parsing, key-PDF formats/validation/provenance, key gate, per-file errors)
+Last updated: 2026-06-12 (multimodal ingestion: CID/CMap PDF decoding, document classification, SmartMarks adapter, booklet parsers, visual-evidence flags, upload audit)
+
+## Ingestion pipeline (js/pdf-extract.js + js/ingest.js)
+
+- The PDF core now decodes real-world generator output: sequential object
+  scanning (never reads inside stream bodies), PDF 1.5 object streams,
+  per-font ToUnicode CMaps (1- and 2-byte CIDs, hex + literal strings),
+  glyph-run line assembly, per-PAGE text with embedded-image detection.
+  Verified against four real teacher uploads (SmartMarks item analysis,
+  compact multi-column key, questions booklet, readings booklet) in
+  scripts/fixtures/real/ — committed at the owner's explicit request as
+  regression fixtures (private repo; contains real exam material).
+- Every file is CLASSIFIED by content signatures (student_results /
+  answer_key / questions_booklet / readings_booklet / unknown_or_failed)
+  then parsed by the matching ADAPTER; wrong-slot uploads are cross-routed
+  with specific messages. New formats = new adapters, not rewrites.
+- SmartMarks adapter: question blocks (Average score, Discrimination,
+  Marks=1.0 → correct answer) zipped with ▼▼-anchored distribution groups
+  per page; validates continuity, single correct answer, avg-vs-share,
+  ~100% sums; counts estimated from percentages are labeled estimates.
+- Questions-booklet adapter: range-driven anchoring (cover examples can't
+  hijack numbering), a./b./c./d. options, section→reading mappings, and
+  VISUAL-DEPENDENCY detection (comic/image/graph/chart/diagram/map…).
+- Readings-booklet adapter: roman-numeral selections with title/author/
+  genre/question range/page range/line-numbering; image pages flagged.
+- NO OCR AND NO VISION MODEL: image/comic pages and visual-dependent
+  questions are honestly flagged ("review by eye"), never interpreted.
+  Page images are NOT rendered/stored (no PDF rasterizer dependency).
+- Results page gains an Upload & Readability Audit (file, detected type,
+  pages, images, extracted, used-or-not) plus key provenance; AI evidence
+  packets carry a visualEvidence flag.
 
 ## Data-integrity model (read this before touching state code)
 
@@ -39,6 +69,7 @@ node scripts/csv-test.js       # parsing, data honesty, state integrity, categor
 node scripts/xlsx-pdf-test.js  # XLSX/PDF parsing + exam-text evidence (109)
 node scripts/smoke-test.js     # every page in empty/demo/uploaded states
 node scripts/ai-test.js        # AI feedback layer + server boundary, fully mocked (41)
+node scripts/real-pdf-test.js  # the four REAL teacher PDFs end-to-end (64)
 ```
 
 Run all four after any change to `js/` or `server.js`. Binary fixtures are

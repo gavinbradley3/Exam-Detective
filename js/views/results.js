@@ -59,6 +59,9 @@ ED.actions = ED.actions || {};
           // 1. Teacher Review Header + 2. Opening Summary (+ source banner)
           B.reportHeader(an) +
 
+          // 2b. AI Deep Review availability (applied / unavailable / fallback)
+          (ED.deepReview ? ED.deepReview.renderBanner(an) : "") +
+
           // 3. Key / Scoring Warning (before everything else that matters)
           B.keyWarning(an) +
 
@@ -77,6 +80,10 @@ ED.actions = ED.actions || {};
             ? "In exam order. Each card shows the response data, what the numbers suggest, and what to check before acting. Question text isn’t available from results CSVs."
             : "Grouped by reading passage, in exam order. Each card shows the original question, what went wrong, the action for this week, and the fix for next year’s test bank.") + '</p>' +
           B.groupedSections(an, { aiInteractive: true }) +
+
+          // 6b. AI Deep Review — whole-report synthesis (Layer 2)
+          (ED.deepReview && an.deepReviewSynthesis
+            ? ED.deepReview.renderSynthesis(an.deepReviewSynthesis) : "") +
 
           // 7. Key Audit Summary
           B.keyAuditSection(an) +

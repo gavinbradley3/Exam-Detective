@@ -43,11 +43,13 @@ ED.actions = ED.actions || {};
     var B = ED.blocks;
     return (
       B.reportHeader(an) +
+      (ED.deepReview ? ED.deepReview.renderBanner(an) : "") +
       B.keyWarning(an) +
       B.legend() +
       '<div class="rhead">Question-by-Question Review</div>' +
       '<p class="rhead-sub">' + (an.source === "uploaded" ? "In exam order, from your uploaded results." : "Grouped by reading passage, in exam order.") + '</p>' +
       B.groupedSections(an) +
+      (ED.deepReview && an.deepReviewSynthesis ? ED.deepReview.renderSynthesis(an.deepReviewSynthesis) : "") +
       B.keyAuditSection(an) +
       B.takeawayPanel(an) +
       B.footerCap(an, "Teacher Review Report")

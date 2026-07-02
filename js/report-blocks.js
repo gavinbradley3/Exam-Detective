@@ -119,6 +119,17 @@ window.ED = window.ED || {};
       var st = A().statsFor(an, f.number);
       return Object.assign({ combined: st.combinedMissed }, f);
     }));
+    // With Deep Review verdicts, urgency comes from the AI action (rescore /
+    // remove / accept-both first), not the deterministic flag label.
+    if (window.ED && ED.deepReview && an.deepReview) {
+      rows.sort(function (a, b) {
+        var ra = an.deepReview[a.number], rb = an.deepReview[b.number];
+        var pa = ra ? ED.deepReview.actionInfo(ra.recommendedActionType).priority : A().flagInfo(a.flag).priority + 10;
+        var pb = rb ? ED.deepReview.actionInfo(rb.recommendedActionType).priority : A().flagInfo(b.flag).priority + 10;
+        if (pa !== pb) return pa - pb;
+        return b.combined - a.combined || a.number - b.number;
+      });
+    }
     return (
       '<div class="rhead">Priority Action List</div>' +
       '<p class="rhead-sub">The most urgent questions first. “% Missed” is the combined rate across all class sections.</p>' +
@@ -127,13 +138,26 @@ window.ED = window.ED || {};
       (withLinks ? '<th scope="col"><span class="visually-hidden">Details</span></th>' : '') +
       '</tr></thead><tbody>' +
       rows.map(function (f) {
+        // Deep Review verdicts take over the action + confidence columns —
+        // the miss-rate numbers and pattern stay deterministic.
+        var review = (window.ED && ED.deepReview && an.deepReview && an.deepReview[f.number]) || null;
+        var actionCell, confCell;
+        if (review) {
+          var ai = ED.deepReview.actionInfo(review.recommendedActionType);
+          actionCell = '<span class="flag ' + ai.cls + '" title="AI Deep Review verdict">' + A().esc(ai.label) + '</span>';
+          var c = String(review.confidence || "");
+          confCell = A().esc(c.charAt(0).toUpperCase() + c.slice(1)) + ' <span class="flag flag-ai" style="margin-left:4px;">AI</span>';
+        } else {
+          actionCell = flagBadge(f.flag);
+          confCell = A().esc(f.confidence);
+        }
         return '<tr>' +
           '<td class="qn">Q' + f.number + '</td>' +
           '<td class="pct">' + (f.noData ? "—" : f.combined + "%") + '</td>' +
           '<td>' + (f.classesAffected.length === an.sections.length ? "All " + an.sections.length : f.classesAffected.join(", ")) + '</td>' +
           '<td>' + A().esc(f.pattern) + '</td>' +
-          '<td>' + flagBadge(f.flag) + '</td>' +
-          '<td>' + A().esc(f.confidence) + '</td>' +
+          '<td>' + actionCell + '</td>' +
+          '<td>' + confCell + '</td>' +
           (withLinks ? '<td><a href="#q' + f.number + '">View details</a></td>' : '') +
         '</tr>';
       }).join("") +
@@ -179,10 +203,17 @@ window.ED = window.ED || {};
     var st = A().statsFor(an, f.number);
     var html = '<div class="qcard" id="q' + f.number + '">';
 
+    // AI Deep Review verdict for this question, if one was produced.
+    // When present it REPLACES the generic rule prose (problem / action /
+    // next-year fix) — but never the deterministic stat block or options.
+    var review = (window.ED && ED.deepReview && an.deepReview && an.deepReview[f.number]) || null;
+    var aiParts = review ? ED.deepReview.renderReviewParts(review, review.extractionStatus || f.aiExtractionStatus || null) : null;
+
     // Stat block row — missing-data cards show dashes, never fake rates
     var noData = !!f.noData;
     var dash = function (v, suffix) { return noData ? "—" : v + (suffix || ""); };
-    var sevCls = { "High": "sev-high", "Medium": "sev-med", "Low": "sev-low", "Data gap": "sev-gap" }[f.severity] || "sev-low";
+    var sevLabel = aiParts && aiParts.severityLabel ? aiParts.severityLabel : f.severity;
+    var sevCls = { "High": "sev-high", "Medium": "sev-med", "Low": "sev-low", "Data gap": "sev-gap" }[sevLabel] || "sev-low";
     html +=
       '<div class="qcard-top">' +
         '<div class="qnum-box"><span class="lbl">QUESTION</span><span class="num">' + f.number + '</span></div>' +
@@ -198,11 +229,13 @@ window.ED = window.ED || {};
             : '') +
         '</div>' +
         '<div class="qflagline">' +
-          (f.severity ? '<span class="flag ' + sevCls + '" title="Severity from the data rules">' + A().esc(f.severity) + '</span> ' : '') +
-          flagBadge(f.flag) +
-          (f.issueCategory ? ' <span class="flag flag-cat" title="Issue category (deterministic data rule)">' + A().esc(f.issueCategory) + '</span>' : '') +
-          (f.secondaryCategory ? ' <span class="flag flag-cat">' + A().esc(f.secondaryCategory) + '</span>' : '') +
-          (f.secondaryFlags || []).map(flagBadge).join(" ") +
+          (sevLabel ? '<span class="flag ' + sevCls + '" title="Severity">' + A().esc(sevLabel) + '</span> ' : '') +
+          (aiParts
+            ? '<span class="flag flag-ai" title="AI Deep Review verdict">AI Deep Review</span> ' + aiParts.flagline
+            : flagBadge(f.flag) +
+              (f.issueCategory ? ' <span class="flag flag-cat" title="Issue category (deterministic data rule)">' + A().esc(f.issueCategory) + '</span>' : '') +
+              (f.secondaryCategory ? ' <span class="flag flag-cat">' + A().esc(f.secondaryCategory) + '</span>' : '') +
+              (f.secondaryFlags || []).map(flagBadge).join(" ")) +
           (f.evidence ? ' <span class="flag flag-evidence" title="What uploaded evidence is available for this question">' + A().esc(f.evidence) + '</span>' : '') +
         '</div>' +
       '</div>';
@@ -214,27 +247,32 @@ window.ED = window.ED || {};
       html += '<ul class="opts">' + f.options.map(optionRow).join("") + '</ul>';
     }
 
-    // The Problem
+    // The Problem — AI verdict replaces the generic rule prose when present.
     html += '<div class="label-line problem"><span class="dot" aria-hidden="true"></span>THE PROBLEM</div>';
-    html += '<p class="prose">' + f.problem + '</p>';
+    html += '<p class="prose">' + (aiParts ? aiParts.problem : f.problem) + '</p>';
 
     // Immediate action + next-year fix
     html += '<div class="label-line fix"><span class="dot" aria-hidden="true"></span>THE IMMEDIATE ACTION &amp; NEXT-YEAR FIX</div>';
     html += '<div class="fixbox">';
     html += '<div class="fixlbl">Immediate Action for This Week</div>';
-    html += '<p class="immediate">' + f.immediate + '</p>';
+    html += '<p class="immediate">' + (aiParts ? aiParts.immediate : f.immediate) + '</p>';
     html += '<div class="fixlbl">Fix for Next Year’s Test Bank</div>';
-    if (f.rewrite) {
+    if (aiParts && aiParts.rewrite) {
+      html += aiParts.rewrite;
+    } else if (aiParts) {
+      html += '<p class="immediate" style="margin-bottom:0;">' + aiParts.nextYear + '</p>';
+    } else if (f.rewrite) {
       html += rewriteBlock(f.rewrite);
     } else {
       html += '<p class="immediate" style="margin-bottom:0;">' + (f.nextYearNote || "Keep the question as written.") + '</p>';
     }
     html += '</div>';
 
-    // Per-card honesty: what the data rules can NOT establish
-    if (f.limitations && f.limitations.length) {
+    // Per-card honesty: what can NOT be confidently established.
+    var limitations = aiParts ? aiParts.limitations : f.limitations;
+    if (limitations && limitations.length) {
       html += '<div class="label-line limits"><span class="dot" aria-hidden="true"></span>WHAT THE APP CAN’T CONFIDENTLY SAY</div>' +
-        '<ul class="limits-list">' + f.limitations.map(function (l) {
+        '<ul class="limits-list">' + limitations.map(function (l) {
           return '<li>' + A().esc(l) + '</li>';
         }).join("") + '</ul>';
     }
@@ -251,8 +289,9 @@ window.ED = window.ED || {};
     // Optional AI layer: stored feedback is part of the analysis record and
     // always renders (incl. exports); the interactive button only appears on
     // the live Results page for uploaded data. AI never affects the
-    // deterministic content above.
-    if (window.ED && ED.ai && an.source === "uploaded") {
+    // deterministic content above. When a Deep Review verdict already covers
+    // this card, the older per-question button is redundant — skip it.
+    if (window.ED && ED.ai && an.source === "uploaded" && !aiParts) {
       var storedAI = an.aiFeedback && an.aiFeedback[f.number];
       if (storedAI && storedAI.feedback) {
         html += ED.ai.renderFeedback(storedAI.feedback, storedAI.extractionStatus);

@@ -50,7 +50,34 @@ open http://localhost:8000. Fixtures live in `scripts/fixtures/`.
       honest refusal; verify nothing invented.
 - [ ] A real answer-key PDF.
 
-## 4. AI feedback
+## 4. AI Deep Review (Run Analysis pipeline)
+
+- [ ] WITHOUT a key (`node server.js`): Step 6 shows the "AI Deep Review"
+      checkbox (checked by default) with the privacy/cost text. Run Analysis
+      → progress log shows real steps (reading files, flag rules) then
+      "AI Deep Review unavailable — no API key configured…" → results open
+      with the "AI Deep Review unavailable" banner; every card is the
+      deterministic version; nothing hangs.
+- [ ] With `ANTHROPIC_API_KEY` set: Run Analysis → progress log shows
+      "Building evidence packets…", then "Reviewing Q<N> with AI…" once per
+      flagged question (bar advances with each), then "Writing the final
+      teacher report…" → results show the green "AI Deep Review applied"
+      banner, purple "AI DEEP REVIEW" chips on flagged cards, a firm
+      recommended action (rescore / accept both / remove / no change /
+      human review) instead of "check the key", and the
+      "AI Deep Review — Department Synthesis" section before the Key Audit.
+- [ ] Deterministic stats unchanged with AI on: MIN/MAX/COMBINED numbers,
+      answer options with ANSWER KEY / MOST CHOSE pills, Key Audit, Upload
+      & Readability Audit, Takeaway all match a deterministic-only run.
+- [ ] Untick the checkbox → Run Analysis → no AI calls; log says Deep
+      Review is turned off; no banner claims AI was used.
+- [ ] Visual-dependent flagged question (comic/graph page): its verdict is
+      "Human review required (visual)" and no rewrite is shown.
+- [ ] Rewrites appear ONLY on cards whose full question text was extracted.
+- [ ] Kill the server mid-run: remaining questions fall back; the banner
+      lists which ones; the report still renders.
+
+## 4b. Per-card AI feedback (older layer)
 
 - [ ] WITHOUT a key (`node server.js`): click "AI-assisted feedback" on a
       flagged card → privacy/cost notice → Send → honest "not configured".
@@ -75,7 +102,8 @@ open http://localhost:8000. Fixtures live in `scripts/fixtures/`.
       Source row inside says uploaded; question rows match the screen.
 - [ ] Demo results export: `_DEMO_` in filename and DEMO DATA inside.
 - [ ] Reports → Teacher Review → Download HTML opens standalone with styling;
-      includes the AI block only if you fetched feedback first.
+      includes Deep Review verdicts + synthesis when the run used AI (and
+      the per-card AI block only if you fetched feedback first).
 - [ ] Print / Save as PDF: cards don't split; interactive buttons hidden;
       source banner still visible.
 

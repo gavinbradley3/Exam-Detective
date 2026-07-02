@@ -160,10 +160,10 @@ content needs to change. Browser releases: MANUAL_TEST_CHECKLIST.md.
 
 ## What was verified
 
-- Both test suites pass: smoke (all views: empty, demo, uploaded states)
-  and csv-test (53 checks: parsing, one-class-in-one-class-out, student
-  totals from CSV, 130-question key incl. Q130 edit/save, blank settings,
-  step-1 validation, export source markers, local save/reopen/backup).
+- All six test suites pass: smoke, csv-test (118), xlsx-pdf-test (109),
+  ai-test (41), real-pdf-test (69), deep-review-test (84) — parsing,
+  data honesty, evidence packets, the strict AI contract, fallback
+  behavior, rendering, saves, and exports.
 - All files serve HTTP 200 from a local static server.
 - No secrets committed (no keys exist — the app is static; verified by search).
 
@@ -182,9 +182,13 @@ content needs to change. Browser releases: MANUAL_TEST_CHECKLIST.md.
   "A." choices, single-column). Real-world exam PDFs with tables, two-column
   layouts, or images may extract partially — partial results are labeled,
   but expect variation. Bug reports with a sample PDF are the way to harden it.
-- **No content judgment** — the app quotes extracted wording as evidence but
-  still doesn't judge whether an answer is defensible (that would need real
-  AI integration; nothing is faked meanwhile).
+- **Content judgment = AI Deep Review** — with `ANTHROPIC_API_KEY` set,
+  Run Analysis sends each flagged question's evidence packet through
+  `/api/deep-review` and renders firm, teacher-facing verdicts (rescore /
+  accept multiple / remove from scoring / revise next year / human review
+  for visuals) in place of the generic rule text. Without a key the app
+  falls back to the deterministic report and says so — nothing is faked.
+  The deterministic engine still decides all flags and all numbers.
 - **Fixtures are self-generated** (`scripts/make-fixtures.js` follows the
   ECMA-376/ZIP and PDF specs), so a real Excel-exported .xlsx and a real
   word-processor exam PDF should be part of the first browser test.

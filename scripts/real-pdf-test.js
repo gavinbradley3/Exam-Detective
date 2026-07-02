@@ -21,7 +21,7 @@ var root = path.join(__dirname, "..");
 [
   "js/data/demo-data.js", "js/analysis.js", "js/csv-parse.js", "js/xlsx-parse.js",
   "js/pdf-extract.js", "js/ingest.js", "js/exam-parse.js", "js/analysis-builder.js",
-  "js/ai-feedback.js", "js/data-store.js", "js/cloud.js", "js/report-blocks.js",
+  "js/ai-feedback.js", "js/deep-review.js", "js/data-store.js", "js/cloud.js", "js/report-blocks.js",
   "js/views/wizard.js", "js/views/results.js"
 ].forEach(function (f) { require(path.join(root, f)); });
 
@@ -167,6 +167,19 @@ function fx(n) {
   if (visualFlagged.length) {
     ok(packet.visualEvidence && packet.visualEvidence.required === true, "AI evidence packet carries the visual-evidence flag");
   }
+  // Deep Review evidence packet for the real Q33 (the gold-report key error):
+  // the packet must carry everything the AI needs to conclude "rescore".
+  var dp33 = ED.deepReview.buildPacket(an, f33);
+  ok(dp33 && dp33.questionNumber === 33 && dp33.uploadedKeyAnswer === "B",
+    "deep packet Q33: keyed answer B from the uploaded key document");
+  ok(dp33.strongestWrongAnswer && dp33.strongestWrongAnswer.beatsKey === true,
+    "deep packet Q33: strongest wrong answer decisively beats the key");
+  ok(dp33.questionStem !== null && /main idea/i.test(dp33.questionStem),
+    "deep packet Q33: real extracted stem included");
+  ok(dp33.totalStudents === 26 && dp33.aggregateOnly === true,
+    "deep packet Q33: honest about aggregate-only data (SmartMarks report has no per-student rows)");
+  ok(!/"S\d+"/.test(JSON.stringify(dp33)), "deep packet Q33: no student identifiers");
+
   ED.data.setActiveUploaded(an);
   var html = ED.views.results();
   ok(html.indexOf("26 students") !== -1 && html.indexOf("129") === -1 && html.indexOf("Strange Orchid (Questions") === -1,

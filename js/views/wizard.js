@@ -687,7 +687,14 @@ ED.actions = ED.actions || {};
         (gate.ok
           ? (s.demoLoaded
               ? '<div class="notice info"><span class="notice-title">Demo mode</span>This run opens the built-in sample results, clearly labeled as demo data.</div>'
-              : '<p class="mb-16">Every number in the results will come from your parsed CSV data. Flags use transparent rules (key conflicts, very high miss rates, big section gaps) — and the results say plainly what this build can’t judge without reading the exam text.</p>') +
+              : '<p class="mb-16">Every number in the results will come from your parsed CSV data. Flags use transparent rules (key conflicts, very high miss rates, big section gaps) — and the results say plainly what this build can’t judge without reading the exam text.</p>' +
+                '<div class="notice info" style="margin-bottom:16px;">' +
+                  '<span class="notice-title">AI Deep Review</span>' +
+                  '<label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;">' +
+                    '<input type="checkbox" data-change="wizard-deep-toggle" id="w-deep-review"' + (s.deepReview === false ? '' : ' checked') + ' style="margin-top:3px;">' +
+                    '<span>After the deterministic analysis, send each flagged question’s <b>evidence packet</b> — question wording, answer choices, aggregate response percentages, and any linked passage excerpt from your uploads — to the AI service configured on the server for a specific teacher-facing verdict. <b>No student names are sent.</b> API use may cost money. If no AI key is configured on the server, the report falls back to the deterministic analysis and says so.</span>' +
+                  '</label>' +
+                '</div>') +
             '<button class="btn btn-primary btn-lg" data-action="wizard-run" id="run-btn">Run Analysis</button>' +
             '<div class="progress-wrap" id="progress-wrap" hidden>' +
               '<div class="progress-bar" role="progressbar" aria-label="Analysis progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-bar"><div></div></div>' +
@@ -1104,6 +1111,12 @@ ED.actions = ED.actions || {};
 
   // ----- run (Step 6) -----
 
+  ED.actions["wizard-deep-toggle"] = function (el) {
+    var s = getState();
+    s.deepReview = !!el.checked;
+    setState(s);
+  };
+
   ED.actions["wizard-run"] = function () {
     var s = getState();
     var gate = canRun(s);
@@ -1117,21 +1130,32 @@ ED.actions = ED.actions || {};
     if (btn) btn.disabled = true;
     wrap.hidden = false;
 
-    var steps;
+    // Real progress: every line below is appended when the work it
+    // describes actually happens — nothing is animated on a timer.
+    function progress(pct, label) {
+      bar.firstElementChild.style.width = pct + "%";
+      bar.setAttribute("aria-valuenow", pct);
+      var li = document.createElement("li");
+      li.textContent = label;
+      log.appendChild(li);
+    }
+    function finish() { setTimeout(function () { location.hash = "#/results"; }, 400); }
+
     if (s.demoLoaded) {
       ED.data.setActiveDemo();
-      steps = [
-        [30, "Opening the built-in demo dataset (5 sections, 129 students)…"],
-        [70, "Loading the sample review…"],
-        [100, "Done — opening demo results, labeled as demo data."]
-      ];
-    } else {
+      progress(100, "Opened the built-in demo dataset (5 sections, 129 students) — labeled as demo data.");
+      finish();
+      return;
+    }
+    {
+      progress(8, "Reading uploaded files (" + ((s.resultFiles || []).length + (s.examFiles || []).length) + " already parsed at upload)…");
       var secs = parsedSections(s);
       var key = (s.key || []).slice(0, s.keyCount || s.key.length);
       var evd = examEvidence(s);
       var meta = uploadMeta(s);
       meta.analysisId = s.analysisId; // ties the results to this wizard session
       var enteredCount = keyEntered(s);
+      progress(16, "Detecting file types and auditing readability…");
       // upload/readability audit: provenance for every file in this analysis
       var uploadAudit = [];
       (s.resultFiles || []).forEach(function (rf) {
@@ -1161,6 +1185,7 @@ ED.actions = ED.actions || {};
           note: ef.status === "parsed" ? "" : (ef.statusText || "")
         });
       });
+      progress(26, "Extracting results and matching questions to readings…");
       var analysis = ED.builder.build({
         uploadAudit: uploadAudit,
         setup: s.setup,
@@ -1177,31 +1202,47 @@ ED.actions = ED.actions || {};
         }
       });
       ED.data.setActiveUploaded(analysis);
-      var students = analysis.totalResponses;
-      steps = [
-        [25, "Scoring " + students + " student results across " + secs.length + " section" + (secs.length === 1 ? "" : "s") + "…"],
-        [50, "Checking " + analysis.totalQuestions + " questions against the key…"],
-        [70, "Applying flag rules (key conflicts, miss rates, section gaps)…"]
-      ];
-      if (evd) {
-        steps.push([90, "Attaching extracted wording for " + evd.coverage.withText + " question" + (evd.coverage.withText === 1 ? "" : "s") + " and " + evd.passages.length + " passage" + (evd.passages.length === 1 ? "" : "s") + "…"]);
-      }
-      steps.push([100, "Done — " + analysis.flagged.length + " question" + (analysis.flagged.length === 1 ? "" : "s") + " flagged for review."]);
-    }
+      progress(38, "Scored " + analysis.totalResponses + " student results across " + secs.length +
+        " section" + (secs.length === 1 ? "" : "s") + "; checked " + analysis.totalQuestions + " questions against the key.");
+      progress(46, "Applied flag rules — " + analysis.flagged.length + " question" +
+        (analysis.flagged.length === 1 ? "" : "s") + " flagged for review" +
+        (evd ? " (wording attached for " + evd.coverage.withText + ")." : "."));
 
-    var i = 0;
-    (function tick() {
-      if (i >= steps.length) {
-        setTimeout(function () { location.hash = "#/results"; }, 600);
+      // ---- AI Deep Review (async; falls back to deterministic honestly) ----
+      if (s.deepReview === false || !window.ED.deepReview) {
+        progress(100, "Done — deterministic report ready" + (s.deepReview === false ? " (AI Deep Review turned off)." : "."));
+        finish();
         return;
       }
-      var st = steps[i++];
-      bar.firstElementChild.style.width = st[0] + "%";
-      bar.setAttribute("aria-valuenow", st[0]);
-      var li = document.createElement("li");
-      li.textContent = st[1];
-      log.appendChild(li);
-      setTimeout(tick, 450);
-    })();
+      var reviewable = analysis.flagged.filter(function (f) { return !f.noData; }).length;
+      var stepNum = 0;
+      ED.deepReview.run(analysis, {
+        onStep: function (label) {
+          stepNum++;
+          progress(Math.min(96, 50 + Math.round((stepNum / (reviewable + 3)) * 46)), label);
+        }
+      }).then(function (res) {
+        analysis.deepReviewStatus = {
+          aiUsed: res.aiUsed, reason: res.reason, failures: res.failures,
+          model: res.model, at: new Date().toISOString()
+        };
+        if (res.aiUsed) {
+          analysis.deepReview = res.reviews;
+          analysis.deepReviewSynthesis = res.synthesis;
+        }
+        ED.data.setActiveUploaded(analysis);
+        var okCount = Object.keys(res.reviews || {}).length;
+        progress(100, res.aiUsed
+          ? "Done — AI verdicts attached to " + okCount + " of " + reviewable + " flagged question" + (reviewable === 1 ? "" : "s") + "."
+          : "Done — deterministic report ready (AI Deep Review unavailable).");
+        finish();
+      }).catch(function () {
+        // never strand the user: the deterministic analysis is already active
+        analysis.deepReviewStatus = { aiUsed: false, reason: "unavailable", failures: [], model: null };
+        ED.data.setActiveUploaded(analysis);
+        progress(100, "Done — deterministic report ready (AI Deep Review failed unexpectedly).");
+        finish();
+      });
+    }
   };
 })();

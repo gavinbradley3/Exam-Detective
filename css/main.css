@@ -225,6 +225,8 @@ a { color: var(--teal); }
 .flag-evidence     { border-color: #c9d4dc; color: #44606f; background: #f2f6f8; border-style: dashed; }
 /* issue-category chips (deterministic rules) */
 .flag-cat          { border-color: #d6cfc2; color: #6e5f43; background: #faf6ee; }
+/* AI Deep Review marker (matches the ai-box purple) */
+.flag-ai           { border-color: #6b5b8e; color: #fff; background: #6b5b8e; }
 /* severity chips */
 .sev-high          { border-color: var(--red); color: #fff; background: var(--red); }
 .sev-med           { border-color: var(--amber); color: #fff; background: var(--amber); }

@@ -1,22 +1,26 @@
 # Auth & Storage Plan
 
-Last updated: 2026-06-11
+Last updated: 2026-07-02
 
-## Where things stand today (be honest with yourself when reading this)
+## Where things stand today
 
-Exam Detective is a **static site** — HTML, CSS, and JavaScript with no backend,
-no server, and no API keys. That means:
+**The app-side sync layer is BUILT** (js/cloud.js — hand-rolled Supabase
+GoTrue + PostgREST client, zero dependencies, covered by
+`node scripts/cloud-test.js`). It activates the moment a deployment
+provides its own `js/config.js`; until then every page says honestly that
+cloud sync is not configured.
 
-- **There is no real login.** The "Sign in" page offers a *local profile*
-  (a name stored in this browser) and shows a deliberately disabled Google
-  button labeled "not connected". Nothing pretends otherwise.
-- **Saved analyses live in `localStorage`** — this browser, this device.
-  Clearing browser data deletes them. The Saved page provides JSON
-  export/import as the safety net.
-- Real Google login + cloud saving **cannot be made real from inside this
-  repo alone**: it requires creating accounts/keys with an external provider
-  (Google Cloud OAuth consent screen + an auth/database service), which only
-  the project owner can do.
+- **Login**: with config present, the Sign in page has a real
+  "Sign in with Google" button (Supabase OAuth, implicit flow; tokens are
+  intercepted before the hash router runs). Without config, the button is
+  visibly disabled — nothing pretends.
+- **Saves**: local `localStorage` saves keep working exactly as before,
+  signed in or not. Signed in, the Saved page adds the account list
+  (list/save/reopen/rename/delete) plus a one-time "copy local analyses to
+  your account" migration that never duplicates.
+- **Ownership**: the client never sends `user_id`; the database assigns it
+  from `auth.uid()` and row-level security restricts every operation to
+  the owner's rows (scripts/supabase-setup.sql).
 
 ## Recommended path: Supabase Auth (Google OAuth) + Postgres
 
@@ -47,7 +51,9 @@ Store per user:
    (`https://<project>.supabase.co/auth/v1/callback`).
 3. In Supabase → Authentication → Providers → Google: paste the Google
    client ID + secret.
-4. Create the table:
+4. Create the table — run `scripts/supabase-setup.sql` in the Supabase
+   SQL editor (it is the statement below plus an index and a
+   delete-cascade, and is safe to re-run):
    ```sql
    create table analyses (
      id uuid primary key default gen_random_uuid(),
@@ -60,10 +66,11 @@ Store per user:
    create policy "own rows" on analyses
      for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
    ```
-5. Add the Supabase JS client to `index.html` and a small `js/cloud.js`
-   that mirrors the `ED.data` save/list/reopen API (so views don't change).
-6. Swap the disabled Google button in `js/views/login.js` for
-   `supabase.auth.signInWithOAuth({ provider: "google" })`.
+5. ~~Client wiring~~ — DONE (js/cloud.js, js/views/login.js,
+   js/views/saved.js). No Supabase JS SDK needed: the client talks to
+   GoTrue/PostgREST directly with fetch.
+6. Copy `js/config.example.js` to `js/config.js` and paste your project
+   URL + anon key. That's the on-switch.
 
 ### Required environment/config values
 
@@ -91,16 +98,21 @@ If a build step is ever added, put the two public values in a `.env` file
 
 ### What still needs to be built in the app
 
-- `js/cloud.js` (Supabase client wrapper mirroring `ED.data`)
-- Login state in the nav driven by the Supabase session instead of the
-  local profile
-- A migration prompt: "You have 3 analyses saved in this browser — move
-  them to your account?"
-- Offline/conflict handling can stay simple: last write wins in v1.
+- ~~`js/cloud.js`~~ — DONE (list/save/get/rename/delete + auth + refresh)
+- ~~Login state in the nav~~ — DONE (account email wins over local profile)
+- ~~Migration prompt~~ — DONE ("Copy N local analyses to account", marks
+  each local save with its cloud row id so re-running never duplicates)
+- Conflict handling is last-write-wins by design in v1 (saves are
+  append-only rows, so conflicts are effectively new rows).
+- Not built yet (deliberately): sharing analyses between accounts,
+  archive/duplicate for cloud rows (local-only for now), realtime sync.
 
-## Why this isn't already done
+## Turning it on (the owner's 3 steps)
 
-Doing it without real provider credentials would mean shipping a fake login
-flow — exactly what this project refuses to do. The moment you create the
-Supabase + Google OAuth accounts and share the two public config values,
-the wiring above is a small, well-defined task.
+1. Run `scripts/supabase-setup.sql` once in the Supabase SQL editor.
+2. In Google Cloud + Supabase dashboards, finish the OAuth provider steps
+   above (client ID/secret pasted into Supabase — never into this repo).
+3. Copy `js/config.example.js` to `js/config.js`, paste the project URL +
+   anon key, and serve the site. The Sign in and Saved pages light up on
+   their own; everything is verified by `node scripts/cloud-test.js`
+   (mocked) and the manual checklist's cloud section (live).

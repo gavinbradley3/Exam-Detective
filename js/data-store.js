@@ -101,13 +101,27 @@ window.ED = window.ED || {};
     return { ok: true, entry: entry };
   }
 
-  function reopenSaved(id) {
-    var entry = listSaved().filter(function (e) { return e.id === id; })[0];
-    if (!entry) return { ok: false, error: "That saved analysis wasn’t found." };
+  // Restore one saved entry (local or downloaded from the cloud) as the
+  // active workspace. Shared by local reopen and cloud reopen so both
+  // restore exactly the same things.
+  function applySavedEntry(entry) {
+    if (!entry || !entry.active) return { ok: false, error: "That saved analysis is missing its data." };
     write(ACTIVE_KEY, entry.active);
     if (entry.wizard) write("examdetective.wizard", entry.wizard);
     if (entry.settings) write("examdetective.settings", entry.settings);
     return { ok: true, entry: entry };
+  }
+
+  function reopenSaved(id) {
+    var entry = listSaved().filter(function (e) { return e.id === id; })[0];
+    if (!entry) return { ok: false, error: "That saved analysis wasn’t found." };
+    return applySavedEntry(entry);
+  }
+
+  // Record that a local save has been uploaded to the cloud (so migration
+  // never uploads the same entry twice).
+  function markCloudId(id, cloudId) {
+    return updateSaved(id, function (e) { e.cloudId = cloudId; });
   }
 
   function deleteSaved(id) {
@@ -209,6 +223,8 @@ window.ED = window.ED || {};
     listSaved: listSaved,
     saveCurrent: saveCurrent,
     reopenSaved: reopenSaved,
+    applySavedEntry: applySavedEntry,
+    markCloudId: markCloudId,
     deleteSaved: deleteSaved,
     renameSaved: renameSaved,
     duplicateSaved: duplicateSaved,

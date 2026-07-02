@@ -160,10 +160,10 @@ content needs to change. Browser releases: MANUAL_TEST_CHECKLIST.md.
 
 ## What was verified
 
-- All six test suites pass: smoke, csv-test (118), xlsx-pdf-test (109),
-  ai-test (41), real-pdf-test (69), deep-review-test (84) — parsing,
-  data honesty, evidence packets, the strict AI contract, fallback
-  behavior, rendering, saves, and exports.
+- All seven test suites pass: smoke, csv-test (118), xlsx-pdf-test (109),
+  ai-test (41), real-pdf-test (69), deep-review-test (92), cloud-test (46)
+  — parsing, data honesty, evidence packets, the strict AI contract,
+  fallback behavior, rendering, saves, cloud sync, and exports.
 - All files serve HTTP 200 from a local static server.
 - No secrets committed (no keys exist — the app is static; verified by search).
 
@@ -194,9 +194,11 @@ content needs to change. Browser releases: MANUAL_TEST_CHECKLIST.md.
   word-processor exam PDF should be part of the first browser test.
 - **Exam-text analysis** — Step 3 files are recorded by name only. Uploaded
   data therefore gets no rewrites/"hard-but-fair" judgments, and the UI says so.
-- **Google login / cloud storage** — not wired (static site, no provider
-  keys). Local profile + local saves work now. Roadmap and exact setup:
-  AUTH_AND_STORAGE_PLAN.md.
+- **Google login / cloud storage** — the app-side layer is BUILT
+  (js/cloud.js: Supabase GoTrue + PostgREST via fetch, no SDK) and stays
+  honestly dormant until a deployment provides js/config.js. Owner
+  on-switch + SQL: AUTH_AND_STORAGE_PLAN.md, scripts/supabase-setup.sql.
+  Local profile + local saves keep working regardless.
 - **DOCX export** — still planned, shown as a dashed "DOCX — planned" tag,
   not a button.
 - "Download HTML" needs a local server (falls back to a friendly message

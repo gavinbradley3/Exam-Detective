@@ -361,8 +361,8 @@ ok(ED.cloud.status().configured === false && /not configured|AUTH_AND_STORAGE/i.
   "cloud sync says honestly that it isn't configured");
 global.ED_CONFIG = { supabaseUrl: "https://x.supabase.co", supabaseAnonKey: "a-very-long-fake-anon-key-value" };
 var cs = ED.cloud.status();
-ok(cs.configured === false && cs.hasConfig === true && /isn’t built/.test(cs.message),
-  "even with config present, the unbuilt sync layer is reported honestly");
+ok(cs.configured === true && cs.signedIn === false && /Sign in with Google/i.test(cs.message),
+  "with config present but no session, cloud sync asks for sign-in honestly");
 delete global.ED_CONFIG;
 
 // ---------- 15. Export filenames & AI feedback in exports ----------

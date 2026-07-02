@@ -74,7 +74,7 @@ check("dashboard (empty)", ED.views.dashboard(), ["No analysis yet", "Saved anal
 check("results (empty)", ED.views.results(), ["no analysis has been run", "Open the demo results"], ["129"]);
 check("comparison (empty)", ED.views.comparison(), ["Nothing to compare"]);
 check("reports (empty)", ED.views.reports(), ["none has been run"]);
-check("login", ED.views.login(), ["Sign in with Google", "Not connected", "local profile", "AUTH_AND_STORAGE_PLAN"]);
+check("login", ED.views.login(), ["Sign in with Google", "Not configured", "local profile", "AUTH_AND_STORAGE_PLAN"]);
 check("saved (empty)", ED.views.saved(), ["Nothing saved yet", "local storage", "Cloud sync", "Not configured"]);
 check("help", ED.views.help(), ["Possible Key Error", "Hard but Fair", "before changing marks"]);
 check("settings", ED.views.settings(), ["Default subject", "Still to decide", "Responsible use", 'value=""']);

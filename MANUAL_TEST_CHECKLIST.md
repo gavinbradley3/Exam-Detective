@@ -95,6 +95,26 @@ open http://localhost:8000. Fixtures live in `scripts/fixtures/`.
       → clean slate again, saves intact.
 - [ ] Export backup (JSON) and re-import it.
 
+## 5b. Cloud sync (needs js/config.js + supabase-setup.sql run once)
+
+- [ ] WITHOUT js/config.js: Sign in page shows the Google button disabled
+      with "Not configured"; Saved page's cloud card says not configured.
+      (The js/config.js 404 in the console is expected.)
+- [ ] With config, signed out: real "Sign in with Google" button on both
+      pages -> Google consent -> lands back on Saved, signed in, with your
+      email in the nav and in the cloud card.
+- [ ] Save current analysis to account -> appears in the account list;
+      Reopen from the list restores the exact analysis; Rename and Delete
+      work; Refresh list reflects changes.
+- [ ] "Copy N local analyses to account" uploads them once — clicking it
+      again uploads nothing (no duplicates), local list untouched.
+- [ ] Sign in on a second browser/device: the account list shows the same
+      analyses; a second Google account sees NONE of them (row-level
+      security check — this one matters).
+- [ ] Sign out: account list gone, local saves + everything else unchanged.
+- [ ] Cancel the Google consent screen: back on the login page with an
+      honest "Sign-in problem" notice, app fully usable.
+
 ## 6. Exports
 
 - [ ] Results "Export data (CSV)": filename like

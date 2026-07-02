@@ -62,11 +62,13 @@ ED.actions = ED.actions || {};
     if (html === "") return; // view redirected (e.g. wizard step 7)
     app.innerHTML = html;
     setActiveNav(entry[1]);
-    // Reflect the local profile in the nav (local storage, not real auth).
+    // Reflect the account in the nav: a real cloud session (email) wins,
+    // then the local profile name, then the sign-in prompt.
     var signin = document.getElementById("nav-signin");
     if (signin && window.ED.data) {
+      var cloudName = ED.cloud && ED.cloud.displayName ? ED.cloud.displayName() : null;
       var p = ED.data.getProfile();
-      signin.textContent = p ? p.name : "Sign in";
+      signin.textContent = cloudName || (p ? p.name : "Sign in");
     }
     // New page: move focus + scroll to top (or to an in-page anchor).
     window.scrollTo(0, 0);

@@ -21,7 +21,7 @@ ED.views.help = function () {
     },
     {
       id: "saving", title: "Saving your work",
-      body: "<p>“Save analysis” on the Results page stores the analysis in <b>this browser’s local storage</b> — on this device, not in the cloud. Reopen saves from the Saved page, and export a JSON backup there if the work matters (clearing browser data deletes local saves). Real sign-in with cloud storage is planned; the Sign in page explains honestly what works today.</p>"
+      body: "<p>“Save analysis” on the Results page stores the analysis in <b>this browser’s local storage</b> — on this device, not in the cloud. Reopen saves from the Saved page, and export a JSON backup there if the work matters (clearing browser data deletes local saves). When this deployment has cloud sync configured, you can also sign in with Google on the Sign in page and keep analyses in your account, available from any device \u2014 the Saved page shows both lists and can copy local saves up. Without that configuration, everything stays local and the pages say so.</p>"
     },
     {
       id: "ai", title: "AI Deep Review & AI feedback",

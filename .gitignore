@@ -1,0 +1,30 @@
+# Dependencies (if Node tooling is ever added)
+node_modules/
+
+# Build output
+dist/
+build/
+out/
+.next/
+
+# Environment / secrets
+.env
+.env.*
+js/config.js
+
+# Uploaded exam material — never commit real exam files, keys, or class data
+uploads/
+exam-files/
+*.key.pdf
+*-answer-key.*
+
+# Temporary / local-only files
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+scratch/
+local/

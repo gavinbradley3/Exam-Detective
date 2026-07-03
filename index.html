@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Exam Detective — Find the questions that need fixing</title>
+<meta name="description" content="Upload exam results from multiple classes. Exam Detective helps teachers spot possible key errors, weak questions, and class-wide patterns before an exam is reused.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=PT+Serif:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/main.css">
+<link rel="stylesheet" href="css/report.css">
+</head>
+<body>
+
+<a class="skip-link" href="#app">Skip to main content</a>
+
+<header class="topnav" id="topnav">
+  <div class="topnav-inner">
+    <a href="#/" class="brand" aria-label="Exam Detective home">
+      <span class="brand-mark" aria-hidden="true">ED</span>
+      <span class="brand-name">Exam Detective</span>
+    </a>
+    <nav class="mainnav" aria-label="Main navigation">
+      <a href="#/dashboard" data-nav="dashboard">Dashboard</a>
+      <a href="#/new-analysis" data-nav="new-analysis">New Analysis</a>
+      <a href="#/comparison" data-nav="comparison">Comparison</a>
+      <a href="#/reports" data-nav="reports">Reports</a>
+      <a href="#/saved" data-nav="saved">Saved</a>
+      <a href="#/help" data-nav="help">Help</a>
+      <a href="#/settings" data-nav="settings">Settings</a>
+      <a href="#/login" data-nav="login" class="nav-signin" id="nav-signin">Sign in</a>
+    </nav>
+  </div>
+</header>
+
+<main id="app" tabindex="-1">
+  <noscript>
+    <div class="container" style="padding:40px 20px;">
+      <p>Exam Detective needs JavaScript to run. Please enable JavaScript and reload the page.</p>
+    </div>
+  </noscript>
+</main>
+
+<footer class="site-footer" id="site-footer">
+  <div class="container">
+    <p class="footer-notice">
+      Exam Detective is designed for aggregate exam-result analysis. Avoid uploading student
+      names or personal information unless your school or district allows it. Delete analyses
+      when they are no longer needed. Suggestions are advisory — always review before changing marks.
+    </p>
+    <p class="footer-meta">Exam Detective · Data leaves this browser only when you opt in: AI Deep Review (evidence packets to the configured AI service) and cloud saves (your account's Supabase project). Everything else stays local.</p>
+  </div>
+</footer>
+
+<!-- Optional deployment config (gitignored; copy js/config.example.js).
+     A 404 here is expected and harmless until cloud sync is configured. -->
+<script src="js/config.js"></script>
+<!-- Data and logic -->
+<script src="js/data/demo-data.js"></script>
+<script src="js/analysis.js"></script>
+<script src="js/csv-parse.js"></script>
+<script src="js/xlsx-parse.js"></script>
+<script src="js/pdf-extract.js"></script>
+<script src="js/ingest.js"></script>
+<script src="js/exam-parse.js"></script>
+<script src="js/analysis-builder.js"></script>
+<script src="js/ai-feedback.js"></script>
+<script src="js/deep-review.js"></script>
+<script src="js/data-store.js"></script>
+<script src="js/cloud.js"></script>
+<script src="js/report-blocks.js"></script>
+<!-- Views (each registers itself on ED.views) -->
+<script src="js/views/landing.js"></script>
+<script src="js/views/dashboard.js"></script>
+<script src="js/views/wizard.js"></script>
+<script src="js/views/results.js"></script>
+<script src="js/views/comparison.js"></script>
+<script src="js/views/reports.js"></script>
+<script src="js/views/saved.js"></script>
+<script src="js/views/login.js"></script>
+<script src="js/views/help.js"></script>
+<script src="js/views/settings.js"></script>
+<!-- Router + actions (must load last) -->
+<script src="js/app.js"></script>
+</body>
+</html>

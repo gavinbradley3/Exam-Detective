@@ -1,0 +1,159 @@
+# Deploy Exam Detective to GitHub Pages.
+#
+# js/config.js is gitignored and never committed. This workflow GENERATES it
+# into the deployed site from repository *variables* (Settings → Secrets and
+# variables → Actions → Variables):
+#   SUPABASE_URL              e.g. https://whqmrsijuzoraykdwfso.supabase.co
+#   SUPABASE_PUBLISHABLE_KEY  the sb_publishable_... (or legacy anon) key
+#
+# Both values are public-by-design — they ship to every browser that loads
+# the site. All data protection comes from Supabase Row Level Security
+# (scripts/supabase-setup.sql). The Supabase SECRET key (sb_secret_... /
+# service_role) must NEVER be used here; the guard step fails the deploy if
+# one is pasted by mistake.
+#
+# If the variables aren't set, the site still deploys and honestly reports
+# "cloud sync isn't configured" — nothing pretends.
+#
+# NOTE: only index.html, css/ and js/ are deployed. The rest of the repo —
+# especially scripts/fixtures/real/ (real exam material) — must never reach
+# the public site.
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}   # run manually from any branch (Actions → Run workflow)
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run all test suites (no network, fully mocked)
+        run: |
+          node scripts/smoke-test.js
+          node scripts/csv-test.js
+          node scripts/xlsx-pdf-test.js
+          node scripts/ai-test.js
+          node scripts/real-pdf-test.js
+          node scripts/deep-review-test.js
+          node scripts/cloud-test.js
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Stage the site (app files ONLY — never fixtures or docs)
+        run: |
+          mkdir -p _site
+          cp index.html _site/
+          cp -r css _site/css
+          cp -r js _site/js
+          rm -f _site/js/config.js _site/js/config.example.js
+
+      - name: Refuse to deploy a secret key
+        if: vars.SUPABASE_PUBLISHABLE_KEY != ''
+        env:
+          KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          node -e '
+            const key = process.env.KEY || "";
+            if (/^sb_secret_/.test(key)) { console.error("FATAL: SUPABASE_PUBLISHABLE_KEY holds a SECRET key (sb_secret_...). Use the publishable key."); process.exit(1); }
+            if (/^eyJ/.test(key)) { // legacy JWT key: verify it is the anon role, not service_role
+              try {
+                const payload = JSON.parse(Buffer.from(key.split(".")[1].replace(/-/g,"+").replace(/_/g,"/"), "base64").toString("utf8"));
+                if (payload.role === "service_role") { console.error("FATAL: SUPABASE_PUBLISHABLE_KEY holds the service_role key. Use the anon/publishable key."); process.exit(1); }
+              } catch (e) { /* not decodable — let the format check below decide */ }
+            }
+            if (!/^sb_publishable_/.test(key) && !/^eyJ/.test(key)) {
+              console.error("FATAL: SUPABASE_PUBLISHABLE_KEY does not look like a publishable (sb_publishable_...) or legacy anon (eyJ...) key.");
+              process.exit(1);
+            }
+            console.log("key format OK (public-by-design key).");
+          '
+
+      - name: Generate js/config.js from repository variables
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const url = (process.env.SUPABASE_URL || "").trim();
+            const key = (process.env.SUPABASE_PUBLISHABLE_KEY || "").trim();
+            if (!url || !key) {
+              console.log("SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY not set — deploying WITHOUT cloud sync (the site will say so honestly).");
+              process.exit(0);
+            }
+            const body =
+              "/* Generated at deploy time by GitHub Actions — never committed.\n" +
+              "   Public-by-design values; all data protection comes from Supabase\n" +
+              "   Row Level Security (scripts/supabase-setup.sql). */\n" +
+              "window.ED_CONFIG = {\n" +
+              "  supabaseUrl: " + JSON.stringify(url) + ",\n" +
+              "  supabaseAnonKey: " + JSON.stringify(key) + "\n" +
+              "};\n";
+            fs.writeFileSync("_site/js/config.js", body);
+            console.log("generated _site/js/config.js for " + url);
+          '
+
+      - name: Verify the staged site
+        run: |
+          test -f _site/index.html
+          test -f _site/js/cloud.js
+          # config must precede cloud.js in load order
+          node -e '
+            const html = require("fs").readFileSync("_site/index.html", "utf8");
+            const cfg = html.indexOf("js/config.js"), cloud = html.indexOf("js/cloud.js");
+            if (cfg === -1 || cloud === -1 || cfg > cloud) { console.error("FATAL: index.html does not load js/config.js before js/cloud.js"); process.exit(1); }
+            console.log("index.html loads js/config.js before js/cloud.js ✓");
+          '
+          # the generated config (when present) must be accepted by the real cloud.js
+          if [ -f _site/js/config.js ]; then
+            node -e '
+              global.window = global;
+              global.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+              global.location = { hash: "#/" };
+              require("./_site/js/config.js");
+              require("./_site/js/data/demo-data.js"); require("./_site/js/analysis.js"); require("./_site/js/cloud.js");
+              const st = global.ED.cloud.status();
+              if (!st.configured) { console.error("FATAL: generated config was rejected by cloud.js"); process.exit(1); }
+              console.log("generated config accepted — cloud sync will be active ✓");
+            '
+          fi
+          # real exam material must never be in the artifact
+          if [ -d _site/scripts ] || [ -d _site/fixtures ]; then echo "FATAL: non-app files staged"; exit 1; fi
+          # no secret keys anywhere in the artifact
+          if grep -rn "sb_secret_\|service_role" _site --include="*.js" --include="*.html" | grep -v "never appear\|NEVER"; then
+            echo "FATAL: secret-key material found in the artifact"; exit 1
+          fi
+          echo "artifact contents:"; find _site -type f | sort
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

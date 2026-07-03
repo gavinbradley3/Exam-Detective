@@ -30,6 +30,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  actions: write   # lets the deploy job delete a stale github-pages artifact on re-runs
 
 concurrency:
   group: github-pages
@@ -152,6 +153,34 @@ jobs:
           echo "artifact contents:"; find _site -type f | sort
 
       - uses: actions/configure-pages@v5
+
+      # Re-running a failed run leaves the previous attempt's "github-pages"
+      # artifact attached to the run; actions/deploy-pages then finds two
+      # matching artifacts and refuses. Delete any stale ones so this run
+      # always ends with EXACTLY ONE artifact named github-pages — the one
+      # uploaded by the single upload-pages-artifact step below.
+      - name: Remove stale github-pages artifacts from this run (re-run safety)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+              per_page: 100
+            });
+            const stale = data.artifacts.filter(a => a.name === "github-pages");
+            for (const a of stale) {
+              core.info(`Deleting stale artifact ${a.id} (${a.name}, created ${a.created_at}) from a previous attempt`);
+              await github.rest.actions.deleteArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: a.id
+              });
+            }
+            core.info(stale.length ? `Deleted ${stale.length} stale artifact(s).` : "No stale github-pages artifacts — clean run.");
+
+      # The ONLY upload of the Pages artifact in this workflow.
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

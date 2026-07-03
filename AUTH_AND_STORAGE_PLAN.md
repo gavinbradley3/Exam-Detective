@@ -102,10 +102,29 @@ If a build step is ever added, put the two public values in a `.env` file
 - ~~Login state in the nav~~ — DONE (account email wins over local profile)
 - ~~Migration prompt~~ — DONE ("Copy N local analyses to account", marks
   each local save with its cloud row id so re-running never duplicates)
+- ~~Local storage scoped per signed-in account~~ — DONE (js/data-store.js).
+  Fixed a real privacy gap found on the live site: on a shared/school
+  computer, `localStorage` has no concept of "signed in as" on its own, so
+  a second Google account signing in on the same browser could see the
+  first account's locally-saved analyses and open results. Local storage
+  keys are now suffixed with the signed-in account's id
+  (`examdetective.saved.acct.<uid>`), so switching accounts on the same
+  device isolates local data the same way cloud rows are isolated by RLS.
+  Signed out (or cloud not configured), storage is unchanged — the single
+  shared bare-key workspace exactly as before. Pre-existing unscoped data
+  is never silently claimed or silently hidden: the Saved page shows a
+  banner ("This is mine — move it into my account" / "Not mine — delete
+  it" / "Not now") whenever signed-in and unscoped data is sitting on the
+  device.
 - Conflict handling is last-write-wins by design in v1 (saves are
   append-only rows, so conflicts are effectively new rows).
 - Not built yet (deliberately): sharing analyses between accounts,
-  archive/duplicate for cloud rows (local-only for now), realtime sync.
+  archive/duplicate for cloud rows (local-only for now), realtime sync,
+  and scoping the IN-PROGRESS wizard state (`examdetective.wizard`) by
+  account — a narrower, lower-frequency version of the same exposure
+  (mid-upload files/keys left in a browser tab before saving). Recommend
+  clicking "Start fresh" in New Analysis when done on a shared device
+  until that's namespaced too.
 
 ## GitHub Pages deployment
 

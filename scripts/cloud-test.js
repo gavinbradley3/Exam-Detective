@@ -252,8 +252,8 @@ seq = seq.then(function () {
 seq = seq.then(function () {
   console.log("Migration:");
   freshSession();
-  // two local saves, one already migrated
-  localStorage.setItem("examdetective.saved", JSON.stringify([
+  // two local saves, one already migrated (scoped to user-123, the signed-in account)
+  localStorage.setItem("examdetective.saved.acct.user-123", JSON.stringify([
     { id: "save-a", name: "Local A", active: { source: "uploaded" }, summary: {} },
     { id: "save-b", name: "Local B", active: { source: "uploaded" }, summary: {}, cloudId: "row-b" }
   ]));
@@ -316,7 +316,8 @@ seq = seq.then(function () {
   ok(loginHtml.indexOf("teacher@school.ca") !== -1 && loginHtml.indexOf('data-action="cloud-signout"') !== -1,
     "login (signed in): shows the account and a sign-out");
   // one local save that has never been uploaded -> migration offer appears
-  localStorage.setItem("examdetective.saved", JSON.stringify([
+  // (scoped to user-123, the signed-in account in this block)
+  localStorage.setItem("examdetective.saved.acct.user-123", JSON.stringify([
     { id: "save-new", name: "Never uploaded", active: { source: "uploaded" }, summary: {} },
     { id: "save-b", name: "Local B", active: { source: "uploaded" }, summary: {}, cloudId: "row-b" }
   ]));
@@ -334,6 +335,119 @@ seq = seq.then(function () {
   ok(loginHtml.indexOf("Sign-in problem") !== -1 && loginHtml.indexOf("consent was cancelled") !== -1,
     "login: auth error from the redirect is shown");
   ok(ED.views.login().indexOf("Sign-in problem") === -1, "auth error shows once, then clears");
+  deconfigure(); clearSession();
+});
+
+// ---------- 8. account isolation of local storage (shared-device fix) ----------
+// Direct regression test for the reported bug: on the same browser, signing
+// in as a different Google account must NOT show the previous account's
+// locally-saved analyses or open results.
+seq = seq.then(function () {
+  console.log("Account isolation (shared-device fix):");
+  configure();
+
+  function sessionFor(uid, email) {
+    localStorage.setItem("examdetective.session", JSON.stringify({
+      access_token: fakeJwt({ sub: uid, email: email }), refresh_token: "r-" + uid,
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+      user: { id: uid, email: email }
+    }));
+  }
+
+  // Teacher A signs in, saves an analysis locally.
+  sessionFor("user-A", "teacherA@school.ca");
+  ED.data.setActiveUploaded({ source: "uploaded", examName: "A's Exam", sections: [], totalResponses: 1, totalQuestions: 1, flagged: [], uploadedMeta: {} });
+  var saveA = ED.data.saveCurrent("Teacher A's analysis");
+  ok(saveA.ok, "Teacher A saves an analysis while signed in");
+  ok(ED.data.listSaved().length === 1 && ED.data.activeAnalysis().examName === "A's Exam",
+    "Teacher A sees their own save and their own open analysis");
+
+  // Teacher B signs in on the SAME browser with a different Google account.
+  sessionFor("user-B", "teacherB@school.ca");
+  ok(ED.data.listSaved().length === 0, "Teacher B's saved list is EMPTY — cannot see Teacher A's save");
+  ok(ED.data.activeAnalysis() === null, "Teacher B has no open analysis — cannot see Teacher A's results");
+
+  // Teacher A signs back in on the same browser: their data is untouched.
+  sessionFor("user-A", "teacherA@school.ca");
+  ok(ED.data.listSaved().length === 1 && ED.data.listSaved()[0].name === "Teacher A's analysis",
+    "Teacher A's save survives the other account's session and is still theirs alone");
+  ok(ED.data.activeAnalysis() && ED.data.activeAnalysis().examName === "A's Exam",
+    "Teacher A's open analysis is still there too");
+
+  // Fully signed out: back to the bare/anonymous bucket, sees neither account's data.
+  clearSession();
+  ok(ED.data.listSaved().length === 0, "signed out: anonymous bucket shows neither account's saves");
+  deconfigure(); clearSession();
+});
+
+// ---------- 9. legacy local data (pre-scoping / previous device user) ----------
+seq = seq.then(function () {
+  console.log("Legacy local data (claim / discard / not-now):");
+  configure();
+
+  function sessionFor(uid, email) {
+    localStorage.setItem("examdetective.session", JSON.stringify({
+      access_token: fakeJwt({ sub: uid, email: email }), refresh_token: "r-" + uid,
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+      user: { id: uid, email: email }
+    }));
+  }
+
+  // Bare-key data from before anyone signed in (or a previous device user).
+  localStorage.setItem("examdetective.active", JSON.stringify({ source: "uploaded", analysis: { examName: "Unclaimed" } }));
+  localStorage.setItem("examdetective.saved", JSON.stringify([{ id: "s1", name: "Unclaimed save", active: {}, summary: {} }]));
+
+  ok(ED.data.legacyLocalStatus().show === false, "signed out: nothing to reconcile (anonymous IS the bare bucket)");
+
+  sessionFor("user-claim", "claimer@school.ca");
+  var st = ED.data.legacyLocalStatus();
+  ok(st.show === true && st.hasActive === true && st.savedCount === 1,
+    "signing in reveals the unscoped legacy data, with correct counts");
+
+  var claimRes = ED.data.claimLegacyLocal();
+  ok(claimRes.ok, "claim succeeds");
+  ok(ED.data.legacyLocalStatus().show === false, "after claiming, nothing legacy is left to flag");
+  ok(ED.data.listSaved().length === 1 && ED.data.listSaved()[0].name === "Unclaimed save",
+    "claimed save now lives in the claiming account's own scoped bucket");
+  ok(ED.data.activeAnalysis() && ED.data.activeAnalysis().examName === "Unclaimed",
+    "claimed active analysis now lives in the claiming account's own scoped workspace");
+  ok(localStorage.getItem("examdetective.saved") === null && localStorage.getItem("examdetective.active") === null,
+    "the bare/unscoped keys are cleared after claiming — no longer visible to anyone else");
+
+  // A different, unrelated account must NOT inherit the claimed data.
+  sessionFor("user-other", "other@school.ca");
+  ok(ED.data.listSaved().length === 0 && ED.data.legacyLocalStatus().show === false,
+    "an unrelated account sees neither the claimed data nor a legacy prompt");
+
+  // Discard flow: fresh legacy data, different signed-in account, choose "not mine".
+  localStorage.setItem("examdetective.saved", JSON.stringify([{ id: "s2", name: "Not mine", active: {}, summary: {} }]));
+  sessionFor("user-discard", "discarder@school.ca");
+  ok(ED.data.legacyLocalStatus().show === true, "fresh legacy data is detected for a new account");
+  var discardRes = ED.data.discardLegacyLocal();
+  ok(discardRes.ok, "discard succeeds");
+  ok(ED.data.legacyLocalStatus().show === false && ED.data.listSaved().length === 0,
+    "after discarding, the legacy data is gone and was never claimed by this account");
+
+  deconfigure(); clearSession();
+});
+
+// ---------- 10. Saved page renders the legacy banner honestly ----------
+seq = seq.then(function () {
+  console.log("Legacy banner (Saved page):");
+  configure();
+  localStorage.setItem("examdetective.saved", JSON.stringify([{ id: "s3", name: "Device leftover", active: {}, summary: {} }]));
+  localStorage.setItem("examdetective.session", JSON.stringify({
+    access_token: fakeJwt({ sub: "user-banner", email: "banner@school.ca" }), refresh_token: "r-banner",
+    expires_at: Math.floor(Date.now() / 1000) + 3600, user: { id: "user-banner", email: "banner@school.ca" }
+  }));
+  var html = ED.views.saved();
+  ok(html.indexOf("Local data from another session on this device") !== -1, "legacy banner renders when unscoped data exists");
+  ok(html.indexOf('data-action="legacy-claim"') !== -1 && html.indexOf('data-action="legacy-discard"') !== -1 &&
+     html.indexOf('data-action="legacy-not-now"') !== -1, "banner offers claim, discard, and not-now — never a silent default");
+  ED.actions["legacy-claim"]();
+  html = ED.views.saved();
+  ok(html.indexOf("Local data from another session on this device") === -1, "banner disappears once claimed");
+  ok(html.indexOf("Device leftover") !== -1, "the claimed save now appears in this account's own saved list");
   deconfigure(); clearSession();
 });
 

@@ -13,6 +13,7 @@ ED.actions = ED.actions || {};
   // view-local UI state (not persisted)
   var query = "";
   var show = "active"; // "active" | "archived"
+  var legacyDismissed = false; // "Not now" hides the legacy-data banner for this page session
 
   function savedRow(e) {
     var esc = ED.analysis.esc;
@@ -72,6 +73,8 @@ ED.actions = ED.actions || {};
           '<p class="lede">The list below lives in <b>this browser’s local storage</b>. Clearing browser data deletes it, so export a backup — or sign in below to keep analyses in your account.</p>' +
         '</div>' +
 
+        legacyBanner() +
+
         (active
           ? '<div class="notice info"><span class="notice-title">Active now</span>' +
             (active.source === "demo" ? "The demo dataset" : "Your uploaded dataset") +
@@ -104,6 +107,28 @@ ED.actions = ED.actions || {};
       '</div></div>'
     );
   };
+
+  // ----- legacy local-data banner (shared-device privacy check) -----
+  // On a shared computer, local saves belong to whoever last used this
+  // browser — never to a Google account. If you're signed in and there's
+  // unscoped local data sitting here, it could be someone else's. We never
+  // silently claim it or silently hide it — you choose.
+  function legacyBanner() {
+    if (legacyDismissed || !ED.data.legacyLocalStatus) return "";
+    var st = ED.data.legacyLocalStatus();
+    if (!st.show) return "";
+    var bits = [];
+    if (st.hasActive) bits.push("an open analysis");
+    if (st.savedCount) bits.push(st.savedCount + " saved analys" + (st.savedCount === 1 ? "is" : "es"));
+    return '<div class="notice alert"><span class="notice-title">Local data from another session on this device</span>' +
+      'This browser has ' + bits.join(" and ") + ' that ' + (bits.length > 1 ? "aren’t" : "isn’t") +
+      ' tied to any account — it could be from someone else who used this computer before you signed in.' +
+      '<div class="btn-row mt-8">' +
+        '<button class="btn btn-sm btn-primary" data-action="legacy-claim">This is mine — move it into my account</button>' +
+        '<button class="btn btn-sm btn-danger" data-action="legacy-discard">Not mine — delete it</button>' +
+        '<button class="btn btn-sm btn-outline" data-action="legacy-not-now">Not now</button>' +
+      '</div></div>';
+  }
 
   // ----- cloud sync card (state-aware; every state honest) -----
 
@@ -148,6 +173,21 @@ ED.actions = ED.actions || {};
   }
 
   // ----- actions -----
+
+  ED.actions["legacy-claim"] = function () {
+    ED.data.claimLegacyLocal();
+    ED.app.rerender();
+  };
+
+  ED.actions["legacy-discard"] = function () {
+    ED.data.discardLegacyLocal();
+    ED.app.rerender();
+  };
+
+  ED.actions["legacy-not-now"] = function () {
+    legacyDismissed = true;
+    ED.app.rerender();
+  };
 
   ED.actions["save-analysis-here"] = function () {
     var an = ED.data.activeAnalysis();

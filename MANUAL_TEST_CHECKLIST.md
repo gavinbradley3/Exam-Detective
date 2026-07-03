@@ -112,6 +112,16 @@ open http://localhost:8000. Fixtures live in `scripts/fixtures/`.
       analyses; a second Google account sees NONE of them (row-level
       security check — this one matters).
 - [ ] Sign out: account list gone, local saves + everything else unchanged.
+- [ ] **Shared-device check (the one that matters most):** sign in as
+      Account 1, save an analysis locally (not to the cloud), then sign in
+      as Account 2 on the SAME browser. Account 2's "Saved analyses" list
+      and any open Results page must be EMPTY of Account 1's data. Sign
+      back in as Account 1 — their local save must still be there.
+- [ ] Legacy-data banner: with nobody signed in, save an analysis locally,
+      then sign in with any account for the first time on that
+      browser/profile. The Saved page should show "Local data from
+      another session on this device" with three choices (claim / delete
+      / not now) — never silently keep or silently discard.
 - [ ] Cancel the Google consent screen: back on the login page with an
       honest "Sign-in problem" notice, app fully usable.
 

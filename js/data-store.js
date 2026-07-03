@@ -4,6 +4,18 @@
    locally saved analyses. Everything lives in this browser's
    localStorage — clearly labeled as local, not cloud, storage.
    See AUTH_AND_STORAGE_PLAN.md for the real-auth roadmap.
+
+   Account isolation on shared devices:
+   When signed in (real Google/Supabase account), the active analysis
+   and saved-analyses list are stored under a key SCOPED to that
+   account's user id — not the bare key. This matters on a shared
+   school/classroom computer: without scoping, Teacher B signing in
+   with a different Google account would still see Teacher A's
+   locally-saved analyses and open results, because plain localStorage
+   has no concept of "signed in as." Scoping closes that gap.
+   Signed OUT (or cloud sync not configured), storage uses the bare,
+   unscoped keys exactly as before — single shared local workspace,
+   same as every prior version of this app.
    ============================================================ */
 
 window.ED = window.ED || {};
@@ -11,8 +23,8 @@ window.ED = window.ED || {};
 (function () {
   "use strict";
 
-  var ACTIVE_KEY = "examdetective.active";
-  var SAVED_KEY = "examdetective.saved";
+  var ACTIVE_KEY_BASE = "examdetective.active";
+  var SAVED_KEY_BASE = "examdetective.saved";
   var PROFILE_KEY = "examdetective.profile";
 
   function read(key, fallback) {
@@ -26,20 +38,37 @@ window.ED = window.ED || {};
     catch (e) { return false; }
   }
 
+  // The signed-in account's id, or null (signed out / cloud not configured
+  // / local-profile-only use). Read fresh every call — sign-in state can
+  // change mid-session.
+  function accountId() {
+    try {
+      if (!window.ED || !ED.cloud || typeof ED.cloud.session !== "function") return null;
+      var s = ED.cloud.session();
+      return (s && s.user && s.user.id) ? s.user.id : null;
+    } catch (e) { return null; }
+  }
+
+  // The account-scoped key when signed in; the plain/legacy key otherwise.
+  function scopedKey(base) {
+    var uid = accountId();
+    return uid ? base + ".acct." + uid : base;
+  }
+
   // ---------- active dataset ----------
   // { source: "demo" } or { source: "uploaded", analysis: {...} }
   // No record at all means: nothing has been run yet.
 
-  function getActiveRecord() { return read(ACTIVE_KEY, null); }
+  function getActiveRecord() { return read(scopedKey(ACTIVE_KEY_BASE), null); }
 
-  function setActiveDemo() { write(ACTIVE_KEY, { source: "demo", activatedAt: Date.now() }); }
+  function setActiveDemo() { write(scopedKey(ACTIVE_KEY_BASE), { source: "demo", activatedAt: Date.now() }); }
 
   function setActiveUploaded(analysis) {
-    write(ACTIVE_KEY, { source: "uploaded", analysis: analysis, activatedAt: Date.now() });
+    write(scopedKey(ACTIVE_KEY_BASE), { source: "uploaded", analysis: analysis, activatedAt: Date.now() });
   }
 
   function clearActive() {
-    try { localStorage.removeItem(ACTIVE_KEY); } catch (e) {}
+    try { localStorage.removeItem(scopedKey(ACTIVE_KEY_BASE)); } catch (e) {}
   }
 
   // Returns the analysis to render, or null if nothing is active.
@@ -64,7 +93,7 @@ window.ED = window.ED || {};
 
   // ---------- saved analyses (local browser storage) ----------
 
-  function listSaved() { return read(SAVED_KEY, []); }
+  function listSaved() { return read(scopedKey(SAVED_KEY_BASE), []); }
 
   function saveCurrent(name) {
     var rec = getActiveRecord();
@@ -95,7 +124,7 @@ window.ED = window.ED || {};
     };
     var all = listSaved();
     all.unshift(entry);
-    if (!write(SAVED_KEY, all)) {
+    if (!write(scopedKey(SAVED_KEY_BASE), all)) {
       return { ok: false, error: "Couldn’t save — this browser’s local storage is full or blocked. Export a JSON backup instead." };
     }
     return { ok: true, entry: entry };
@@ -106,7 +135,7 @@ window.ED = window.ED || {};
   // restore exactly the same things.
   function applySavedEntry(entry) {
     if (!entry || !entry.active) return { ok: false, error: "That saved analysis is missing its data." };
-    write(ACTIVE_KEY, entry.active);
+    write(scopedKey(ACTIVE_KEY_BASE), entry.active);
     if (entry.wizard) write("examdetective.wizard", entry.wizard);
     if (entry.settings) write("examdetective.settings", entry.settings);
     return { ok: true, entry: entry };
@@ -125,7 +154,7 @@ window.ED = window.ED || {};
   }
 
   function deleteSaved(id) {
-    write(SAVED_KEY, listSaved().filter(function (e) { return e.id !== id; }));
+    write(scopedKey(SAVED_KEY_BASE), listSaved().filter(function (e) { return e.id !== id; }));
   }
 
   function updateSaved(id, fn) {
@@ -134,7 +163,7 @@ window.ED = window.ED || {};
     if (!entry) return { ok: false, error: "That saved analysis wasn’t found." };
     fn(entry);
     entry.modifiedAt = new Date().toISOString();
-    write(SAVED_KEY, all);
+    write(scopedKey(SAVED_KEY_BASE), all);
     return { ok: true, entry: entry };
   }
 
@@ -160,7 +189,7 @@ window.ED = window.ED || {};
     copy.archived = false;
     var all = listSaved();
     all.unshift(copy);
-    if (!write(SAVED_KEY, all)) return { ok: false, error: "Couldn’t save the copy — local storage is full." };
+    if (!write(scopedKey(SAVED_KEY_BASE), all)) return { ok: false, error: "Couldn’t save the copy — local storage is full." };
     return { ok: true, entry: copy };
   }
 
@@ -203,8 +232,45 @@ window.ED = window.ED || {};
     data.saved.forEach(function (e) {
       if (e && e.id && !existingIds[e.id]) { existing.push(e); added++; }
     });
-    write(SAVED_KEY, existing);
+    write(scopedKey(SAVED_KEY_BASE), existing);
     return { ok: true, added: added, skipped: data.saved.length - added };
+  }
+
+  // ---------- legacy local data (from before sign-in, or another user of
+  // this device) — never silently claimed or silently hidden ----------
+
+  // Is there unscoped (bare-key) active/saved data sitting on this device
+  // while someone is signed in? That data predates this account or belongs
+  // to whoever last used this device without signing in as this account.
+  function legacyLocalStatus() {
+    var uid = accountId();
+    if (!uid) return { show: false, savedCount: 0, hasActive: false };
+    var legacyActive = read(ACTIVE_KEY_BASE, null);
+    var legacySaved = read(SAVED_KEY_BASE, []);
+    var savedCount = (legacySaved || []).length;
+    return { show: !!legacyActive || savedCount > 0, savedCount: savedCount, hasActive: !!legacyActive };
+  }
+
+  // "This is mine" — move the unscoped local data into the signed-in
+  // account's own scoped bucket (still local-only; nothing is uploaded),
+  // then clear the unscoped keys so no other account can see it.
+  function claimLegacyLocal() {
+    var uid = accountId();
+    if (!uid) return { ok: false, error: "Sign in first." };
+    var legacyActive = read(ACTIVE_KEY_BASE, null);
+    var legacySaved = read(SAVED_KEY_BASE, []);
+    if (legacyActive) write(scopedKey(ACTIVE_KEY_BASE), legacyActive);
+    if (legacySaved && legacySaved.length) {
+      write(scopedKey(SAVED_KEY_BASE), legacySaved.concat(listSaved()));
+    }
+    try { localStorage.removeItem(ACTIVE_KEY_BASE); localStorage.removeItem(SAVED_KEY_BASE); } catch (e) {}
+    return { ok: true };
+  }
+
+  // "Not mine" — delete the unscoped local data outright.
+  function discardLegacyLocal() {
+    try { localStorage.removeItem(ACTIVE_KEY_BASE); localStorage.removeItem(SAVED_KEY_BASE); } catch (e) {}
+    return { ok: true };
   }
 
   // ---------- local profile (NOT real authentication) ----------
@@ -232,6 +298,9 @@ window.ED = window.ED || {};
     filterSaved: filterSaved,
     exportBackup: exportBackup,
     importBackup: importBackup,
+    legacyLocalStatus: legacyLocalStatus,
+    claimLegacyLocal: claimLegacyLocal,
+    discardLegacyLocal: discardLegacyLocal,
     getProfile: getProfile,
     setProfile: setProfile,
     clearProfile: clearProfile

@@ -107,6 +107,22 @@ If a build step is ever added, put the two public values in a `.env` file
 - Not built yet (deliberately): sharing analyses between accounts,
   archive/duplicate for cloud rows (local-only for now), realtime sync.
 
+## GitHub Pages deployment
+
+`.github/workflows/deploy-pages.yml` deploys the app to GitHub Pages and
+GENERATES `js/config.js` into the site at deploy time from two repository
+variables — `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` (Settings →
+Secrets and variables → Actions → Variables). The file stays gitignored
+and uncommitted; the values are public-by-design and ship to every
+browser, with all protection coming from row-level security. The workflow
+refuses to deploy a secret key (`sb_secret_` / `service_role`), stages
+ONLY index.html + css/ + js/ (never `scripts/fixtures/real/`, which holds
+real exam material), runs all seven test suites first, and verifies the
+generated config is accepted by cloud.js before publishing. Without the
+variables, the site deploys and honestly reports cloud sync as not
+configured. Note: Pages is static hosting — AI Deep Review needs
+`server.js` and honestly reports itself unavailable on the Pages site.
+
 ## Turning it on (the owner's 3 steps)
 
 1. Run `scripts/supabase-setup.sql` once in the Supabase SQL editor.

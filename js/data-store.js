@@ -25,6 +25,7 @@ window.ED = window.ED || {};
 
   var ACTIVE_KEY_BASE = "examdetective.active";
   var SAVED_KEY_BASE = "examdetective.saved";
+  var WIZARD_KEY_BASE = "examdetective.wizard";
   var PROFILE_KEY = "examdetective.profile";
 
   function read(key, fallback) {
@@ -99,7 +100,7 @@ window.ED = window.ED || {};
     var rec = getActiveRecord();
     if (!rec) return { ok: false, error: "Nothing to save yet — run an analysis first." };
     var an = activeAnalysis();
-    var wizard = read("examdetective.wizard", null);
+    var wizard = read(scopedKey(WIZARD_KEY_BASE), null);
     var settings = read("examdetective.settings", null);
     var entry = {
       id: "save-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6),
@@ -136,7 +137,7 @@ window.ED = window.ED || {};
   function applySavedEntry(entry) {
     if (!entry || !entry.active) return { ok: false, error: "That saved analysis is missing its data." };
     write(scopedKey(ACTIVE_KEY_BASE), entry.active);
-    if (entry.wizard) write("examdetective.wizard", entry.wizard);
+    if (entry.wizard) write(scopedKey(WIZARD_KEY_BASE), entry.wizard);
     if (entry.settings) write("examdetective.settings", entry.settings);
     return { ok: true, entry: entry };
   }
@@ -244,11 +245,19 @@ window.ED = window.ED || {};
   // to whoever last used this device without signing in as this account.
   function legacyLocalStatus() {
     var uid = accountId();
-    if (!uid) return { show: false, savedCount: 0, hasActive: false };
+    if (!uid) return { show: false, savedCount: 0, hasActive: false, hasWizard: false };
     var legacyActive = read(ACTIVE_KEY_BASE, null);
     var legacySaved = read(SAVED_KEY_BASE, []);
+    var legacyWizard = read(WIZARD_KEY_BASE, null);
+    // an untouched default wizard state isn't "data" — only flag real progress
+    var wizardHasContent = !!(legacyWizard && (
+      (legacyWizard.resultFiles || []).length || (legacyWizard.examFiles || []).length ||
+      (legacyWizard.keyCount || 0) > 0 || (legacyWizard.setup && legacyWizard.setup.examName)));
     var savedCount = (legacySaved || []).length;
-    return { show: !!legacyActive || savedCount > 0, savedCount: savedCount, hasActive: !!legacyActive };
+    return {
+      show: !!legacyActive || savedCount > 0 || wizardHasContent,
+      savedCount: savedCount, hasActive: !!legacyActive, hasWizard: wizardHasContent
+    };
   }
 
   // "This is mine" — move the unscoped local data into the signed-in
@@ -259,17 +268,27 @@ window.ED = window.ED || {};
     if (!uid) return { ok: false, error: "Sign in first." };
     var legacyActive = read(ACTIVE_KEY_BASE, null);
     var legacySaved = read(SAVED_KEY_BASE, []);
+    var legacyWizard = read(WIZARD_KEY_BASE, null);
     if (legacyActive) write(scopedKey(ACTIVE_KEY_BASE), legacyActive);
     if (legacySaved && legacySaved.length) {
       write(scopedKey(SAVED_KEY_BASE), legacySaved.concat(listSaved()));
     }
-    try { localStorage.removeItem(ACTIVE_KEY_BASE); localStorage.removeItem(SAVED_KEY_BASE); } catch (e) {}
+    if (legacyWizard) write(scopedKey(WIZARD_KEY_BASE), legacyWizard);
+    try {
+      localStorage.removeItem(ACTIVE_KEY_BASE);
+      localStorage.removeItem(SAVED_KEY_BASE);
+      localStorage.removeItem(WIZARD_KEY_BASE);
+    } catch (e) {}
     return { ok: true };
   }
 
   // "Not mine" — delete the unscoped local data outright.
   function discardLegacyLocal() {
-    try { localStorage.removeItem(ACTIVE_KEY_BASE); localStorage.removeItem(SAVED_KEY_BASE); } catch (e) {}
+    try {
+      localStorage.removeItem(ACTIVE_KEY_BASE);
+      localStorage.removeItem(SAVED_KEY_BASE);
+      localStorage.removeItem(WIZARD_KEY_BASE);
+    } catch (e) {}
     return { ok: true };
   }
 
@@ -279,7 +298,12 @@ window.ED = window.ED || {};
   function setProfile(name) { write(PROFILE_KEY, { name: name, createdAt: Date.now() }); }
   function clearProfile() { try { localStorage.removeItem(PROFILE_KEY); } catch (e) {} }
 
+  // The wizard stores in-progress uploads/keys under this key — scoped per
+  // signed-in account for the same shared-device reason as saves above.
+  function wizardKey() { return scopedKey(WIZARD_KEY_BASE); }
+
   ED.data = {
+    wizardKey: wizardKey,
     getActiveRecord: getActiveRecord,
     setActiveDemo: setActiveDemo,
     setActiveUploaded: setActiveUploaded,

@@ -118,13 +118,15 @@ If a build step is ever added, put the two public values in a `.env` file
   device.
 - Conflict handling is last-write-wins by design in v1 (saves are
   append-only rows, so conflicts are effectively new rows).
+- ~~Scoping the IN-PROGRESS wizard state by account~~ — DONE. Mid-upload
+  files and answer keys in the New Analysis wizard are stored under the
+  same per-account key scheme as saves, so an abandoned half-finished
+  analysis on a shared computer is invisible to the next account. The
+  legacy-data banner covers unscoped wizard leftovers too (claim /
+  delete / not now), and an untouched empty wizard is never flagged as
+  someone's data.
 - Not built yet (deliberately): sharing analyses between accounts,
-  archive/duplicate for cloud rows (local-only for now), realtime sync,
-  and scoping the IN-PROGRESS wizard state (`examdetective.wizard`) by
-  account — a narrower, lower-frequency version of the same exposure
-  (mid-upload files/keys left in a browser tab before saving). Recommend
-  clicking "Start fresh" in New Analysis when done on a shared device
-  until that's namespaced too.
+  archive/duplicate for cloud rows (local-only for now), realtime sync.
 
 ## GitHub Pages deployment
 

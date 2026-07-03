@@ -23,7 +23,7 @@ var root = path.join(__dirname, "..");
 [
   "js/data/demo-data.js", "js/analysis.js", "js/csv-parse.js",
   "js/analysis-builder.js", "js/data-store.js", "js/cloud.js",
-  "js/views/login.js", "js/views/saved.js"
+  "js/views/login.js", "js/views/saved.js", "js/views/wizard.js"
 ].forEach(function (f) { require(path.join(root, f)); });
 
 var ED = global.ED;
@@ -377,6 +377,19 @@ seq = seq.then(function () {
   // Fully signed out: back to the bare/anonymous bucket, sees neither account's data.
   clearSession();
   ok(ED.data.listSaved().length === 0, "signed out: anonymous bucket shows neither account's saves");
+
+  // In-progress wizard state (uploaded files/keys before saving) is scoped too.
+  sessionFor("user-A", "teacherA@school.ca");
+  ED.wizard.setState({ analysisId: "an-A", setup: { examName: "A's secret exam" },
+    resultFiles: [{ name: "8A.pdf", status: "parsed", sections: [] }], examFiles: [], key: ["A"], keyCount: 1 });
+  ok(ED.wizard.getState().setup.examName === "A's secret exam", "Teacher A's in-progress wizard state persists for A");
+  sessionFor("user-B", "teacherB@school.ca");
+  ok(!ED.wizard.getState().setup.examName && ED.wizard.getState().resultFiles.length === 0,
+    "Teacher B cannot see Teacher A's in-progress uploads or key");
+  sessionFor("user-A", "teacherA@school.ca");
+  ok(ED.wizard.getState().setup.examName === "A's secret exam" && ED.wizard.getState().keyCount === 1,
+    "Teacher A's in-progress wizard state survives the other account's session");
+  ED.wizard.resetState();
   deconfigure(); clearSession();
 });
 
@@ -427,6 +440,23 @@ seq = seq.then(function () {
   ok(discardRes.ok, "discard succeeds");
   ok(ED.data.legacyLocalStatus().show === false && ED.data.listSaved().length === 0,
     "after discarding, the legacy data is gone and was never claimed by this account");
+
+  // Legacy IN-PROGRESS WIZARD data (bare key) is detected, claimable, and discardable.
+  localStorage.setItem("examdetective.wizard", JSON.stringify({
+    analysisId: "an-legacy", setup: { examName: "Left mid-upload" },
+    resultFiles: [{ name: "8D.pdf", status: "parsed", sections: [] }], examFiles: [], key: [], keyCount: 0
+  }));
+  sessionFor("user-wiz", "wiz@school.ca");
+  var wst = ED.data.legacyLocalStatus();
+  ok(wst.show === true && wst.hasWizard === true, "legacy in-progress wizard uploads are detected");
+  ED.data.claimLegacyLocal();
+  ok(localStorage.getItem("examdetective.wizard") === null, "bare wizard key cleared after claiming");
+  ok(ED.wizard.getState().setup.examName === "Left mid-upload", "claimed wizard state lands in the claiming account's workspace");
+  ED.wizard.resetState();
+  // untouched default wizard state must NOT trigger the banner
+  localStorage.setItem("examdetective.wizard", JSON.stringify({ analysisId: "an-x", setup: { examName: "" }, resultFiles: [], examFiles: [], key: [], keyCount: 0 }));
+  ok(ED.data.legacyLocalStatus().show === false, "an empty default wizard state is not flagged as someone's data");
+  localStorage.removeItem("examdetective.wizard");
 
   deconfigure(); clearSession();
 });

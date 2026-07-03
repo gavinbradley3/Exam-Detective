@@ -15,7 +15,13 @@ ED.actions = ED.actions || {};
 (function () {
   "use strict";
 
-  var STORE_KEY = "examdetective.wizard";
+  // In-progress uploads/keys are sensitive exam material, so the storage
+  // key is scoped per signed-in account (ED.data.wizardKey) — on a shared
+  // computer, another account must not see a half-finished analysis.
+  // Signed out, this resolves to the same bare key as always.
+  function storeKey() {
+    return ED.data && ED.data.wizardKey ? ED.data.wizardKey() : "examdetective.wizard";
+  }
   var MAX_Q = 130; // manual answer key supports questions 1–130
 
   var STEPS = [
@@ -60,7 +66,7 @@ ED.actions = ED.actions || {};
 
   function getState() {
     try {
-      var raw = localStorage.getItem(STORE_KEY);
+      var raw = localStorage.getItem(storeKey());
       var s = raw ? JSON.parse(raw) : defaultState();
       // older saved states may miss newer fields
       if (s.keyCount === undefined) s.keyCount = (s.key || []).length;
@@ -72,11 +78,11 @@ ED.actions = ED.actions || {};
   }
 
   function setState(s) {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(s)); } catch (e) { /* private mode: state just won't persist */ }
+    try { localStorage.setItem(storeKey(), JSON.stringify(s)); } catch (e) { /* private mode: state just won't persist */ }
   }
 
   function resetState() {
-    try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+    try { localStorage.removeItem(storeKey()); } catch (e) {}
   }
 
   // Anything the user has put into the wizard counts as progress.

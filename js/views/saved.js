@@ -120,6 +120,7 @@ ED.actions = ED.actions || {};
     var bits = [];
     if (st.hasActive) bits.push("an open analysis");
     if (st.savedCount) bits.push(st.savedCount + " saved analys" + (st.savedCount === 1 ? "is" : "es"));
+    if (st.hasWizard) bits.push("an in-progress upload (files/answer key in the New Analysis wizard)");
     return '<div class="notice alert"><span class="notice-title">Local data from another session on this device</span>' +
       'This browser has ' + bits.join(" and ") + ' that ' + (bits.length > 1 ? "aren’t" : "isn’t") +
       ' tied to any account — it could be from someone else who used this computer before you signed in.' +
